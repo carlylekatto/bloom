@@ -14,6 +14,7 @@ Run from the repo root unless noted. Bun 1.4.0, Rust stable.
 - `src-tauri/src/diagnostics.rs` — read-only machine snapshot behind `get_diagnostics` and Settings → About → Copy Diagnostics. It exists so a bug report carries the reporter's monitor layout, shell class state and crash marker instead of guessing. Collection must stay read-only: never call `set_taskbar_visibility`, never set `TRAY_INTERACTION_ACTIVE`, never touch Explorer. `REPORTED_SETTINGS` is an allow-list for the same reason — a full settings dump would leak `bloom-weather-city`
 - `cargo test --locked` in `src-tauri` — pure-function unit tests. Fast on Windows; CI runs it alongside `check` and `clippy`
 - `bun test scripts/` — frontend test (`scripts/dockApps.test.ts`), also in CI. There is still no general frontend test runner or lint script
+- `bun run i18n:check` — validates `src/i18n/locales/*.json` and every literal `t("...")` key used in `src/`. Missing translations are warnings with a coverage report (English fallback); invalid keys/placeholders/empty values fail
 - `bun run bump <x.y.z>` — bumps `package.json`, `tauri.conf.json`, `Cargo.toml`, `Cargo.lock` together
 - `bun run release <x.y.z>` — bump + commit + tag + push, must be on `main`. The release workflow fails unless all four version files match the tag. Before/after releasing, follow `RELEASE_CHECKLIST.md` (updater manifest verification, N‑1 install smoke test)
 - `website/` is a separate static site: use `npm install` / `npm run dev` there. Root scripts and CI do not build it

@@ -11,7 +11,8 @@
 		"tauri": "tauri",
 		"bump": "bun scripts/bump-version.mjs",
 		"release": "bun scripts/release.mjs",
-		"format": "oxfmt && cd src-tauri && cargo fmt"
+		"format": "oxfmt && cd src-tauri && cargo fmt",
+		"i18n:check": "bun scripts/i18n-check.mjs"
 	},
 	"dependencies": {
 		"@crabnebula/tauri-plugin-drag": "^2.1.0",

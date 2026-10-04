@@ -205,6 +205,8 @@ that won't come back means something broke in a path we didn't cover.
 Bloom is open source.
 Found a bug? Open an issue.
 Have an idea? Open a feature request first — we'll agree on the approach before you write code. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Have an idea? Send a PR.
+Want to translate Bloom? See [Translations](CONTRIBUTING.md#translations) in the contributing guide.
 Want to just say it's cool? A star goes a long way.
 
 Licensed under [GPLv3](LICENSE).
