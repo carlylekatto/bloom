@@ -201,7 +201,10 @@
 		},
 		"addApp": {
 			"searchPlaceholder": "Search apps...",
-			"noResults": "No results"
+			"noResults": "No results",
+			"emptyHint": "Running apps show up here — search to pin anything else",
+			"running": "Running",
+			"allApps": "All apps"
 		},
 		"tooltip": {
 			"start": "Start",

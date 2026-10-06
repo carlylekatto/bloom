@@ -512,6 +512,10 @@ const Dock = memo(function Dock() {
 			// popup opens with data ready instead of waiting on the scan.
 			invoke<AppInfo[]>("get_installed_apps").catch(() => {});
 
+			// Warm the installed-apps cache in the background so the add-app
+			// popup opens with data ready instead of waiting on the scan.
+			invoke<AppInfo[]>("get_installed_apps").catch(() => {});
+
 			// Load custom icons
 			try {
 				const icons = await invoke<Record<string, string>>("get_custom_icons");
@@ -857,6 +861,8 @@ const Dock = memo(function Dock() {
 			if (pin === app && isBrowserHost(app.path)) invoke("refresh_installed_apps").catch(() => {});
 			newPinned = [...pinnedApps, { ...pin, is_pinned: true, is_running: false, hwnd: undefined }];
 			fetchIcon(pin.path, pin.name);
+			newPinned = [...pinnedApps, { ...app, is_pinned: true, is_running: false, hwnd: undefined }];
+			fetchIcon(app.path, app.name);
 		}
 		setPinnedApps(newPinned);
 		await invoke("save_pinned_apps", { apps: newPinned });
@@ -2456,6 +2462,9 @@ function AddAppPopup({
 			const out: { title: string | null; items: AppInfo[] }[] = [];
 			if (runningSuggestions.length > 0) out.push({ title: "Running", items: runningSuggestions });
 			if (rest.length > 0) out.push({ title: "All apps", items: rest });
+			if (runningSuggestions.length > 0)
+				out.push({ title: t("dock.addApp.running"), items: runningSuggestions });
+			if (rest.length > 0) out.push({ title: t("dock.addApp.allApps"), items: rest });
 			return out;
 		}
 		const starts: AppInfo[] = [];
@@ -2473,6 +2482,7 @@ function AddAppPopup({
 		contains.sort(byName);
 		return [{ title: null, items: [...starts, ...contains].slice(0, 50) }];
 	}, [apps, debouncedSearch, pinned, runningSuggestions]);
+	}, [apps, debouncedSearch, pinned, runningSuggestions, t]);
 
 	// Flat selectable list; section headers are not selectable.
 	const flat = useMemo(() => sections.flatMap((s) => s.items), [sections]);
@@ -2672,7 +2682,9 @@ function AddAppPopup({
 							</div>
 						))
 					) : (
-						<div className="popup-empty">{t("dock.addApp.noResults")}</div>
+						<div className="popup-empty">
+							{debouncedSearch.trim() ? t("dock.addApp.noResults") : t("dock.addApp.emptyHint")}
+						</div>
 					)}
 				</div>
 			</motion.div>
