@@ -5,7 +5,8 @@ use windows::Win32::Foundation::{HWND, LPARAM};
 use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
 
 use crate::services::{
-    enum_windows_proc, register_dock_appbar, sync_overlays, unregister_appbar_native,
+    disable_dock_appbar, enum_windows_proc, register_dock_appbar, sync_overlays,
+    unregister_appbar_native,
 };
 use crate::state::*;
 use crate::types::{
@@ -28,13 +29,126 @@ pub async fn set_dock_hovered(hovered: bool) {
 }
 
 #[tauri::command]
-pub async fn set_notch_hovered(hovered: bool) {
+pub async fn set_notch_hovered(app: AppHandle, hovered: bool) {
     NOTCH_IS_HOVERED.store(hovered, Ordering::Relaxed);
+    // Re-evaluate right away. During a native drag the webview never sees the
+    // pointer leave, so waiting for the next mouse move can leave the notch
+    // (and its edge-hover state) stuck expanded in peek/smart mode.
+    crate::services::refresh_main_interaction(&app);
 }
 
 #[tauri::command]
 pub async fn set_notch_visible(visible: bool) {
     NOTCH_IS_VISIBLE.store(visible, Ordering::Relaxed);
+}
+
+#[tauri::command]
+pub fn setup_shelf_drop(app: AppHandle) {
+    let first = app.clone();
+    let _ = app.run_on_main_thread(move || crate::shelf::setup(&first));
+    // WebView2 can create or recreate its render child after first paint;
+    // re-register once it has settled so the drop target tracks the live window.
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+        let late = app.clone();
+        let _ = app.run_on_main_thread(move || crate::shelf::setup(&late));
+    });
+}
+
+/// Small PNG preview for shelf items, as a data URI. `None` for anything that
+/// is not a readable image (the frontend falls back to a generic file icon).
+#[tauri::command]
+pub async fn shelf_thumbnail(path: String) -> Option<String> {
+    use base64::Engine;
+
+    let p = std::path::Path::new(&path);
+    let ext = p.extension()?.to_str()?.to_ascii_lowercase();
+    if !matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "tif" | "tiff"
+    ) {
+        return None;
+    }
+    let meta = std::fs::metadata(p).ok()?;
+    if !meta.is_file() || meta.len() > 32 * 1024 * 1024 {
+        return None;
+    }
+
+    // Decode with dimension/allocation caps: a small, highly compressed file
+    // can still expand into a huge bitmap.
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(8192);
+    limits.max_image_height = Some(8192);
+    limits.max_alloc = Some(256 * 1024 * 1024);
+    let mut reader = image::ImageReader::open(p)
+        .ok()?
+        .with_guessed_format()
+        .ok()?;
+    reader.limits(limits);
+    let img = reader.decode().ok()?;
+    let thumb = img.thumbnail(256, 256);
+    let mut png_bytes: Vec<u8> = Vec::new();
+    thumb
+        .write_to(
+            &mut std::io::Cursor::new(&mut png_bytes),
+            image::ImageFormat::Png,
+        )
+        .ok()?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+    Some(format!("data:image/png;base64,{}", b64))
+}
+
+/// Opens a shelf file in its default app. Uses the opener plugin's Rust API
+/// directly: its JS `open_path` command additionally requires a path scope,
+/// which an empty capability would deny for every file.
+#[tauri::command]
+pub async fn shelf_open(path: String) -> Result<(), String> {
+    tauri_plugin_opener::open_path(&path, None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Drops shelf entries whose files no longer exist (moved, deleted, drive
+/// unplugged). Called once at startup so the shelf does not accumulate dead
+/// references across sessions.
+#[tauri::command]
+pub async fn shelf_prune(paths: Vec<String>) -> Vec<String> {
+    paths
+        .into_iter()
+        .filter(|p| std::path::Path::new(p).exists())
+        .collect()
+}
+
+/// Generic document icon used as the native drag preview for shelf items that
+/// have no thumbnail. Returned as a PNG data URI.
+#[tauri::command]
+pub fn shelf_drag_icon() -> Option<String> {
+    use base64::Engine;
+
+    let page = image::Rgba([246, 246, 246, 255]);
+    let fold = image::Rgba([198, 198, 198, 255]);
+    let line = image::Rgba([152, 152, 152, 255]);
+    let mut img = image::RgbaImage::from_pixel(64, 64, image::Rgba([0, 0, 0, 0]));
+
+    for y in 6..58u32 {
+        for x in 14..50u32 {
+            let in_fold = x >= 38 && y <= 18 && (x - 38) + (y - 6) >= 12;
+            img.put_pixel(x, y, if in_fold { fold } else { page });
+        }
+    }
+    for (i, y) in [22u32, 30, 38, 46].into_iter().enumerate() {
+        let end = if i == 3 { 36 } else { 42 };
+        for x in 20..end {
+            img.put_pixel(x, y, line);
+        }
+    }
+
+    let mut png_bytes: Vec<u8> = Vec::new();
+    img.write_to(
+        &mut std::io::Cursor::new(&mut png_bytes),
+        image::ImageFormat::Png,
+    )
+    .ok()?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+    Some(format!("data:image/png;base64,{}", b64))
 }
 
 #[tauri::command]
@@ -83,12 +197,8 @@ pub async fn init_dock(app: AppHandle, mode: String) {
     // The frontend already checks this, but settings.json may have a stale
     // value if the write didn't complete before restart. Reading here too
     // makes the dock reliably stay hidden regardless of frontend timing.
-    let enabled = get_setting_str(&app, "bloom-dock-enabled").unwrap_or_else(|| "true".to_string());
-    if enabled != "true" {
-        if let Some(dock_win) = app.get_webview_window("dock") {
-            let _ = dock_win.hide();
-            DOCK_APPBAR_REGISTERED.store(false, Ordering::Relaxed);
-        }
+    if !dock_enabled() {
+        disable_dock(&app);
         return;
     }
 
@@ -109,6 +219,9 @@ pub async fn init_dock(app: AppHandle, mode: String) {
             let dock_clone = dock_win.clone();
             tauri::async_runtime::spawn(async move {
                 for attempt in 0..20 {
+                    if !dock_enabled() {
+                        return;
+                    }
                     // Wait for monitor and window dimensions to be available.
                     // Never use a hardcoded fallback — wrong values produce off-screen placement.
                     // Extract HWND as isize before any await (raw pointer is not Send).
@@ -157,7 +270,9 @@ pub async fn init_dock(app: AppHandle, mode: String) {
                                 re_assert_topmost(hwnd);
                             }
                             // Ensure visible after positioning
-                            let _ = dock_clone.show();
+                            if dock_enabled() {
+                                let _ = dock_clone.show();
+                            }
                             break;
                         }
                     }
@@ -184,29 +299,27 @@ pub async fn init_dock(app: AppHandle, mode: String) {
     }
 }
 
+fn disable_dock(app: &AppHandle) {
+    // Clear this before showing the native taskbar: the WinEvent hook can run
+    // during ShowWindow and would otherwise immediately hide it again.
+    NATIVE_TASKBAR_HIDDEN.store(false, Ordering::Relaxed);
+    if let Some(dock_win) = app.get_webview_window("dock") {
+        disable_dock_appbar(dock_win);
+    }
+    DOCK_APPBAR_REGISTERED.store(false, Ordering::Relaxed);
+    set_taskbar_visibility(true, true);
+    crate::services::reconcile_main_appbar(app);
+}
+
 #[tauri::command]
 pub async fn toggle_dock(app: AppHandle, enable: bool) {
-    if let Some(dock_win) = app.get_webview_window("dock") {
-        if enable {
-            // Load the saved dock mode; "smart" is the fresh-install default.
-            let saved_mode = crate::utils::get_setting_str(&app, "bloom-dock-mode")
-                .unwrap_or_else(|| "smart".to_string());
-            init_dock(app, saved_mode).await;
-        } else {
-            let _ = dock_win.hide();
-            if let Ok(hwnd) = dock_win.hwnd() {
-                let hwnd_val = hwnd.0 as isize;
-                tauri::async_runtime::spawn_blocking(move || {
-                    unregister_appbar_native(HWND(hwnd_val as *mut _));
-                });
-            }
-            DOCK_APPBAR_REGISTERED.store(false, Ordering::Relaxed);
-            set_taskbar_visibility(true, true);
-            NATIVE_TASKBAR_HIDDEN.store(false, Ordering::Relaxed);
-
-            // Re-sync other appbars
-            crate::services::reconcile_main_appbar(&app);
-        }
+    if enable {
+        // Load the saved dock mode; "smart" is the fresh-install default.
+        let saved_mode = crate::utils::get_setting_str(&app, "bloom-dock-mode")
+            .unwrap_or_else(|| "smart".to_string());
+        init_dock(app, saved_mode).await;
+    } else {
+        disable_dock(&app);
     }
 }
 
@@ -217,9 +330,7 @@ pub async fn sync_appbar(app: AppHandle) {
     crate::services::reconcile_main_appbar(&app);
     if let Some(dock_win) = app.get_webview_window("dock") {
         // Skip dock re-registration if dock is disabled in settings.
-        let dock_enabled =
-            get_setting_str(&app, "bloom-dock-enabled").unwrap_or_else(|| "true".to_string());
-        if dock_enabled == "true" && DOCK_APPBAR_REGISTERED.load(Ordering::Relaxed) {
+        if dock_enabled() && DOCK_APPBAR_REGISTERED.load(Ordering::Relaxed) {
             register_dock_appbar(dock_win);
         } else {
             if let Ok(hwnd) = dock_win.hwnd() {
@@ -234,8 +345,7 @@ pub async fn sync_appbar(app: AppHandle) {
 pub async fn change_dock_mode(app: AppHandle, mode: String) {
     // A disabled dock keeps the new mode in settings (init_dock applies it on
     // re-enable) but must not be shown or replace the native taskbar now.
-    let enabled = get_setting_str(&app, "bloom-dock-enabled").unwrap_or_else(|| "true".to_string());
-    if enabled != "true" {
+    if !dock_enabled() {
         return;
     }
     if let Some(dock_win) = app.get_webview_window("dock") {
@@ -2069,6 +2179,10 @@ pub fn open_notification_center() {
 
 #[tauri::command]
 pub fn open_system_tray() {
+    // The native taskbar is already available when the dock is disabled.
+    if !dock_enabled() {
+        return;
+    }
     tauri::async_runtime::spawn_blocking(move || unsafe {
         use std::sync::atomic::Ordering;
         use windows::core::PCSTR;
@@ -2077,6 +2191,10 @@ pub fn open_system_tray() {
             SetWindowLongA, ShowWindow, GWL_EXSTYLE, LWA_ALPHA, SW_SHOW, WS_EX_LAYERED,
             WS_EX_TRANSPARENT,
         };
+
+        if !dock_enabled() {
+            return;
+        }
 
         let tray_class = PCSTR(c"Shell_TrayWnd".as_ptr() as *const u8);
         let hwnd = FindWindowA(tray_class, windows::core::PCSTR::null()).unwrap_or_default();
@@ -2251,9 +2369,11 @@ pub fn open_system_tray() {
                     }
                 }
 
-                // Once closed, hide taskbar again
-                crate::utils::set_taskbar_visibility(false, false);
-                crate::state::NATIVE_TASKBAR_HIDDEN.store(true, Ordering::Relaxed);
+                // Once closed, hide the taskbar only if the dock is still enabled.
+                if dock_enabled() {
+                    crate::utils::set_taskbar_visibility(false, false);
+                    crate::state::NATIVE_TASKBAR_HIDDEN.store(true, Ordering::Relaxed);
+                }
 
                 // Revert transparency
                 let tray_class = PCSTR(c"Shell_TrayWnd".as_ptr() as *const u8);
@@ -3088,8 +3208,7 @@ fn is_wlan_connected_sync() -> bool {
         if let Some(list) = interface_list.as_ref() {
             let count = list.dwNumberOfItems as usize;
             if count > 0 && count <= 64 {
-                let interfaces =
-                    std::slice::from_raw_parts(list.InterfaceInfo.as_ptr(), count);
+                let interfaces = std::slice::from_raw_parts(list.InterfaceInfo.as_ptr(), count);
                 for interface in interfaces {
                     let mut data_size = 0u32;
                     let mut data: *mut std::ffi::c_void = std::ptr::null_mut();

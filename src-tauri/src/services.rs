@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{
-    atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU8, Ordering},
+    atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicIsize, AtomicU8, Ordering},
     Mutex, OnceLock,
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -30,18 +30,45 @@ static WIN_NUMBER_HELD: AtomicU8 = AtomicU8::new(0);
 /// See `send_start_menu_mask`.
 const MASK_VK: u16 = 0xE8;
 
-pub fn setup_keyboard_hook(
-    app_handle: AppHandle,
-) -> windows::Win32::UI::WindowsAndMessaging::HHOOK {
-    let _ = KEYBOARD_HOOK_APP_HANDLE.set(app_handle);
+/// Raw handle of the installed keyboard hook, 0 while none is installed.
+static KEYBOARD_HOOK: AtomicIsize = AtomicIsize::new(0);
+
+/// Win+1-9 is the only feature that needs a global keyboard hook: Explorer
+/// already registers those hotkeys, so `RegisterHotKey` can't claim them.
+/// Volume and brightness keys are left to Windows, and Bloom's overlays follow
+/// the resulting changes instead. The hook only exists while Win+1-9 is in use
+/// (the dock replaces the taskbar and the setting is on); the rest of the time
+/// Bloom doesn't see the keyboard at all.
+pub fn setup_keyboard_hook(app_handle: AppHandle) {
+    let _ = KEYBOARD_HOOK_APP_HANDLE.set(app_handle.clone());
+    std::thread::spawn(move || {
+        // Exiting removes the hook with the process; never touch it mid-shutdown.
+        while !SHUTTING_DOWN.load(Ordering::Relaxed) {
+            let wanted = NATIVE_TASKBAR_HIDDEN.load(Ordering::Relaxed) && dock_win_number_enabled();
+            if wanted != (KEYBOARD_HOOK.load(Ordering::Relaxed) != 0) {
+                // A low-level hook runs on the thread that installed it, which
+                // needs a message loop, so install and remove it on the main thread.
+                let _ = app_handle.run_on_main_thread(move || set_keyboard_hook(wanted));
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    });
+}
+
+fn set_keyboard_hook(enabled: bool) {
+    use windows::Win32::UI::WindowsAndMessaging::{UnhookWindowsHookEx, HHOOK, WH_KEYBOARD_LL};
+    let current = KEYBOARD_HOOK.load(Ordering::Relaxed);
     unsafe {
-        windows::Win32::UI::WindowsAndMessaging::SetWindowsHookExA(
-            windows::Win32::UI::WindowsAndMessaging::WH_KEYBOARD_LL,
-            Some(keyboard_hook_proc),
-            None,
-            0,
-        )
-        .expect("Failed")
+        if enabled && current == 0 {
+            if let Ok(hook) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_proc), None, 0) {
+                KEYBOARD_HOOK.store(hook.0 as isize, Ordering::Relaxed);
+            }
+        } else if !enabled && current != 0 {
+            let _ = UnhookWindowsHookEx(HHOOK(current as *mut _));
+            KEYBOARD_HOOK.store(0, Ordering::Relaxed);
+            WIN_KEY_DOWN.store(false, Ordering::Relaxed);
+            WIN_NUMBER_HELD.store(0, Ordering::Relaxed);
+        }
     }
 }
 
@@ -70,12 +97,6 @@ fn overlay_enabled(app: &AppHandle, key: &str) -> bool {
     crate::utils::get_setting_str(app, key)
         .map(|v| v != "false")
         .unwrap_or(true)
-}
-
-fn hook_overlay_enabled(key: &str) -> bool {
-    KEYBOARD_HOOK_APP_HANDLE
-        .get()
-        .is_none_or(|app| overlay_enabled(app, key))
 }
 
 /// Physical Win state straight from the OS. The tracked flag can go stale when
@@ -146,9 +167,7 @@ unsafe extern "system" fn keyboard_hook_proc(
     wparam: windows::Win32::Foundation::WPARAM,
     lparam: windows::Win32::Foundation::LPARAM,
 ) -> windows::Win32::Foundation::LRESULT {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{
-        VIRTUAL_KEY, VK_LWIN, VK_RWIN, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
-    };
+    use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_LWIN, VK_RWIN};
     use windows::Win32::UI::WindowsAndMessaging::{
         KBDLLHOOKSTRUCT, LLKHF_INJECTED, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
     };
@@ -198,69 +217,10 @@ unsafe extern "system" fn keyboard_hook_proc(
                 }
             }
         }
-
-        if (vk_code == VK_VOLUME_MUTE || vk_code == VK_VOLUME_UP || vk_code == VK_VOLUME_DOWN)
-            && hook_overlay_enabled("bloom-volume-overlay-enabled")
-        {
-            if is_down {
-                handle_volume_key_event(vk_code);
-            }
-            return windows::Win32::Foundation::LRESULT(1);
-        }
-        if (vk_code.0 == 0x216 || vk_code.0 == 0x217)
-            && hook_overlay_enabled("bloom-brightness-overlay-enabled")
-        {
-            if is_down {
-                handle_brightness_key_event(vk_code);
-            }
-            return windows::Win32::Foundation::LRESULT(1);
-        }
     }
     windows::Win32::UI::WindowsAndMessaging::CallNextHookEx(None, code, wparam, lparam)
 }
 
-fn handle_volume_key_event(vk_code: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) {
-    use std::sync::atomic::AtomicU64;
-    static LAST_TIME: AtomicU64 = AtomicU64::new(0);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64;
-    let last = LAST_TIME.load(std::sync::atomic::Ordering::Relaxed);
-    if now - last < 50 {
-        return;
-    }
-    LAST_TIME.store(now, std::sync::atomic::Ordering::Relaxed);
-    if let Some(sender) = crate::state::COMMAND_SENDER.get() {
-        use windows::Win32::UI::Input::KeyboardAndMouse::{
-            VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
-        };
-        let cmd = match vk_code {
-            VK_VOLUME_MUTE => Some(SystemCommand::VolumeMute),
-            VK_VOLUME_UP => Some(SystemCommand::VolumeUp),
-            VK_VOLUME_DOWN => Some(SystemCommand::VolumeDown),
-            _ => None,
-        };
-        if let Some(cmd) = cmd {
-            let _ = sender.send(cmd);
-        }
-    }
-}
-
-fn handle_brightness_key_event(vk_code: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) {
-    if let Some(sender) = crate::state::COMMAND_SENDER.get() {
-        let cmd = if vk_code.0 == 0x216 {
-            Some(SystemCommand::BrightnessDown)
-        } else if vk_code.0 == 0x217 {
-            Some(SystemCommand::BrightnessUp)
-        } else {
-            None
-        };
-        if let Some(cmd) = cmd {
-            let _ = sender.send(cmd);
-        }
-    }
-}
 use crate::state::*;
 use crate::types::*;
 use crate::utils::*;
@@ -1048,35 +1008,6 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
                     // Only the volume commands need the audio endpoint. Media, brightness and
                     // visibility commands must keep working when there is no output device.
                     match (cmd, audio_endpoint_volume.as_ref()) {
-                        (SystemCommand::VolumeMute, Some(aev)) => {
-                            if let Ok(muted) = aev.GetMute() {
-                                let _ = aev.SetMute(!muted.as_bool(), std::ptr::null());
-                                hide_osd("bloom-volume-overlay-enabled");
-                            }
-                        }
-                        (SystemCommand::VolumeUp, Some(aev)) => {
-                            if let (Ok(vol), Ok(muted)) =
-                                (aev.GetMasterVolumeLevelScalar(), aev.GetMute())
-                            {
-                                let _ = aev.SetMasterVolumeLevelScalar(
-                                    (vol + 0.05).min(1.0),
-                                    std::ptr::null(),
-                                );
-                                if muted.as_bool() {
-                                    let _ = aev.SetMute(false, std::ptr::null());
-                                }
-                                hide_osd("bloom-volume-overlay-enabled");
-                            }
-                        }
-                        (SystemCommand::VolumeDown, Some(aev)) => {
-                            if let Ok(vol) = aev.GetMasterVolumeLevelScalar() {
-                                let _ = aev.SetMasterVolumeLevelScalar(
-                                    (vol - 0.05).max(0.0),
-                                    std::ptr::null(),
-                                );
-                                hide_osd("bloom-volume-overlay-enabled");
-                            }
-                        }
                         (SystemCommand::SetVolume(volume), Some(aev)) => {
                             let _ = aev.SetMasterVolumeLevelScalar(
                                 volume.clamp(0.0, 1.0),
@@ -1087,13 +1018,7 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
                             }
                             hide_osd("bloom-volume-overlay-enabled");
                         }
-                        (
-                            SystemCommand::VolumeMute
-                            | SystemCommand::VolumeUp
-                            | SystemCommand::VolumeDown
-                            | SystemCommand::SetVolume(_),
-                            None,
-                        ) => {}
+                        (SystemCommand::SetVolume(_), None) => {}
                         (SystemCommand::MediaPlayPause, _) => {
                             if let Some(ref mgr) = manager {
                                 if let Ok(session) = mgr.GetCurrentSession() {
@@ -1132,38 +1057,6 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
                                     let _ = w.hide();
                                 }
                             }
-                        }
-                        (SystemCommand::BrightnessUp, _) => {
-                            let new_val =
-                                (CURRENT_BRIGHTNESS.load(Ordering::Relaxed) + 10).min(100);
-                            CURRENT_BRIGHTNESS.store(new_val, Ordering::Relaxed);
-                            LAST_BRIGHTNESS_CHANGE.store(get_now_ms(), Ordering::Relaxed);
-                            let _ = handle_system.emit(
-                                "brightness-change",
-                                BrightnessChangeEvent {
-                                    brightness: new_val,
-                                },
-                            );
-                            if let Some(tx) = BRIGHTNESS_SENDER.get() {
-                                let _ = tx.send(new_val);
-                            }
-                            hide_osd("bloom-brightness-overlay-enabled");
-                        }
-                        (SystemCommand::BrightnessDown, _) => {
-                            let current = CURRENT_BRIGHTNESS.load(Ordering::Relaxed);
-                            let new_val = current.saturating_sub(10);
-                            CURRENT_BRIGHTNESS.store(new_val, Ordering::Relaxed);
-                            LAST_BRIGHTNESS_CHANGE.store(get_now_ms(), Ordering::Relaxed);
-                            let _ = handle_system.emit(
-                                "brightness-change",
-                                BrightnessChangeEvent {
-                                    brightness: new_val,
-                                },
-                            );
-                            if let Some(tx) = BRIGHTNESS_SENDER.get() {
-                                let _ = tx.send(new_val);
-                            }
-                            hide_osd("bloom-brightness-overlay-enabled");
                         }
                     }
                 }
@@ -1384,6 +1277,27 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
             Err(_) => 50,
         };
         CURRENT_BRIGHTNESS.store(last_brightness, Ordering::Relaxed);
+        // Brightness keys are handled by Windows or the firmware, so follow the
+        // resulting changes as they happen; the overlay then appears at once.
+        // Changes Bloom made itself (its slider) are skipped like the poll did.
+        if let Ok(events) = wmi_con.raw_notification::<WmiMonitorBrightnessEvent>(
+            "SELECT * FROM WmiMonitorBrightnessEvent",
+        ) {
+            for event in events {
+                let Ok(event) = event else { break };
+                let brightness = event.brightness as u32;
+                if get_now_ms() - LAST_BRIGHTNESS_CHANGE.load(Ordering::Relaxed) < 2000
+                    || brightness == last_brightness
+                {
+                    continue;
+                }
+                last_brightness = brightness;
+                CURRENT_BRIGHTNESS.store(brightness, Ordering::Relaxed);
+                let _ = handle_brightness
+                    .emit("brightness-change", BrightnessChangeEvent { brightness });
+            }
+        }
+        // Fall back to polling when the subscription is unavailable or ends.
         loop {
             if get_now_ms() - LAST_BRIGHTNESS_CHANGE.load(Ordering::Relaxed) < 2000 {
                 std::thread::sleep(std::time::Duration::from_millis(500));
@@ -2224,6 +2138,19 @@ fn now_ms() -> i64 {
         .as_millis() as i64
 }
 
+/// Re-runs notch hit-testing immediately. Called when the frontend's hover
+/// flag changes so edge-hover state cannot go stale while the cursor is
+/// stationary — a native drag-out ends with the pointer outside the notch but
+/// the webview never saw it leave.
+pub fn refresh_main_interaction(app_handle: &AppHandle) {
+    let mut pt = windows::Win32::Foundation::POINT::default();
+    if unsafe { windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt) }.is_err() {
+        return;
+    }
+    let fg_fs = CURRENT_FOREGROUND_FULLSCREEN.load(Ordering::Relaxed);
+    update_main_interaction(app_handle, pt, now_ms(), fg_fs);
+}
+
 /// True while a screen-capture UI (Windows Snipping Tool) has a visible window.
 /// Bloom's notch sits exactly where that toolbar lives, so it must get out of
 /// the way even if the capture window isn't recognised as fullscreen.
@@ -2425,6 +2352,11 @@ fn update_main_interaction(
         if MH_LAST_TOP_EDGE_HOVER.swap(0, Ordering::Relaxed) != 0 {
             let _ = app_handle.emit("notch-edge-hover", false);
         }
+        // Bloom is fully click-through here, so the webview cannot clear its
+        // own hover state; do it for it.
+        if NOTCH_IS_HOVERED.swap(false, Ordering::Relaxed) {
+            let _ = app_handle.emit("notch-pointer-left", ());
+        }
         return;
     }
 
@@ -2456,6 +2388,16 @@ fn update_main_interaction(
         is_notch_hovered = true;
         MH_TOPBAR_EXPIRY_MS.store(now + 500, Ordering::Relaxed);
     }
+
+    // An OS file drag can only reach the webview's drop target when the
+    // window is not click-through: WS_EX_TRANSPARENT hides the entire window
+    // (and its webview children) from OLE hit-testing, which shows the
+    // no-drop cursor and never emits drag events. Detect a held left button
+    // so a drag over the notch can force interactivity.
+    let drag_held = unsafe {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+        (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0
+    };
 
     let mut is_click_interactive = false;
     let main_rect_val = MAIN_WINDOW_RECT.lock().ok().and_then(|g| *g);
@@ -2501,6 +2443,13 @@ fn update_main_interaction(
                 if (notch_visible || hover_active) && (in_notch_rect || in_top_span) {
                     is_click_interactive = true;
                 }
+
+                // A held left button means a possible OS drag: OLE cannot
+                // hit-test a click-through window, so force interactivity over
+                // the notch or the drop target is unreachable.
+                if drag_held && (in_notch_rect || in_top_span) {
+                    is_click_interactive = true;
+                }
             }
         }
     }
@@ -2517,26 +2466,33 @@ fn update_main_interaction(
     let prev_ignore = MH_LAST_MAIN_IGNORE.load(Ordering::Relaxed);
     let new_ignore = if final_ignore { 1 } else { 0 };
     if prev_ignore != new_ignore {
-        if let Ok(hwnd) = main_win.hwnd() {
-            re_assert_topmost(hwnd);
+        // Z-order re-assertion is a synchronous window operation; skip it
+        // while a drag may be active, where it can visibly hitch the drag.
+        if !drag_held {
+            if let Ok(hwnd) = main_win.hwnd() {
+                re_assert_topmost(hwnd);
+            }
         }
         let _ = main_win.set_ignore_cursor_events(final_ignore);
         MH_LAST_MAIN_IGNORE.store(new_ignore, Ordering::Relaxed);
+        // Once the window is click-through the webview can never receive the
+        // mouseleave that would clear its hover state (it may already have
+        // missed it if the pointer left in the same frame). Tell it explicitly
+        // or the notch stays expanded in peek/smart mode.
+        if new_ignore == 1 && NOTCH_IS_HOVERED.swap(false, Ordering::Relaxed) {
+            let _ = app_handle.emit("notch-pointer-left", ());
+        }
     }
 }
 
-/// Completes a pending top-edge dwell while the cursor is stationary. The mouse
-/// hook only fires on movement, so without this an intentional "rest on the top
-/// edge" gesture would never arm.
+/// Keeps notch hit-testing fresh while the cursor is stationary: completes a
+/// pending top-edge dwell, forces interactivity during a held-button drag, and
+/// catches boundary crossings the movement-only hook misses (so the click-
+/// through flip — and its hover-clear — always happens).
 fn setup_top_edge_watchdog(app_handle: AppHandle) {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(TOP_EDGE_POLL_MS));
         if CAPTURE_UI_ACTIVE.load(Ordering::Relaxed) || SHUTTING_DOWN.load(Ordering::Relaxed) {
-            continue;
-        }
-        if MH_TOP_EDGE_ENTER_MS.load(Ordering::Relaxed) == 0
-            || MH_TOP_EDGE_ARMED.load(Ordering::Relaxed)
-        {
             continue;
         }
         let mut pt = windows::Win32::Foundation::POINT::default();
@@ -3374,7 +3330,26 @@ pub fn register_dock_appbar(window: tauri::WebviewWindow) {
     register_dock_appbar_inner(window, 0);
 }
 
+static DOCK_APPBAR_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_dock_appbar() -> std::sync::MutexGuard<'static, ()> {
+    DOCK_APPBAR_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+pub fn disable_dock_appbar(window: tauri::WebviewWindow) {
+    let _guard = lock_dock_appbar();
+    let _ = window.hide();
+    if let Ok(hwnd) = window.hwnd() {
+        unregister_appbar_native(hwnd);
+    }
+    DOCK_APPBAR_REGISTERED.store(false, Ordering::Relaxed);
+}
+
 fn register_dock_appbar_inner(window: tauri::WebviewWindow, attempt: i32) {
+    // Registration retries may outlive a settings change that disabled the dock.
+    if !crate::utils::dock_enabled() {
+        return;
+    }
     if let Ok(Some(monitor)) = window.app_handle().primary_monitor() {
         let m_size = monitor.size();
         let m_pos = monitor.position();
@@ -3397,6 +3372,13 @@ fn register_dock_appbar_inner(window: tauri::WebviewWindow, attempt: i32) {
         }
 
         let pr = ((56.0 * bloom_scale) * scale) as i32;
+
+        // Serialize with disable_dock_appbar, then check the setting again.
+        // A pending registration must not outlive a dock-disable request.
+        let _guard = lock_dock_appbar();
+        if !crate::utils::dock_enabled() {
+            return;
+        }
 
         unsafe {
             use windows::Win32::Foundation::RECT;
@@ -3727,9 +3709,7 @@ fn reposition_all_windows(app_handle: &AppHandle) {
     // Only reposition the dock if it's enabled in settings.
     // Without this guard, power events (plug/unplug, wake) would re-show
     // a dock that the user had previously disabled.
-    let dock_enabled =
-        get_setting_str(app_handle, "bloom-dock-enabled").unwrap_or_else(|| "true".to_string());
-    if dock_enabled == "true" {
+    if crate::utils::dock_enabled() {
         if let Some(dock_win) = app_handle.get_webview_window("dock") {
             if DOCK_APPBAR_REGISTERED.load(Ordering::Relaxed) {
                 register_dock_appbar(dock_win);
@@ -3762,6 +3742,9 @@ fn reposition_autohide_dock(app_handle: &AppHandle, dock_win: tauri::WebviewWind
     tauri::async_runtime::spawn(async move {
         for _attempt in 0..5 {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            if !crate::utils::dock_enabled() {
+                return;
+            }
             let hwnd_val = match dock_clone.hwnd() {
                 Ok(h) => h.0 as isize,
                 Err(_) => continue,
@@ -3798,7 +3781,9 @@ fn reposition_autohide_dock(app_handle: &AppHandle, dock_win: tauri::WebviewWind
                 if let Ok(hwnd) = dock_clone.hwnd() {
                     re_assert_topmost(hwnd);
                 }
-                let _ = dock_clone.show();
+                if crate::utils::dock_enabled() {
+                    let _ = dock_clone.show();
+                }
                 break;
             }
         }
