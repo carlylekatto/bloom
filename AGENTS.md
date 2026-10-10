@@ -10,6 +10,7 @@ Run from the repo root unless noted. Bun 1.4.0, Rust stable.
 - `bun run tauri dev` — full dev loop. Vite is on strict port 1420; do not start `bun run dev` separately
 - `bun run build` — `tsc && vite build`; this is the frontend typecheck. `strict` + `noUnusedLocals`/`noUnusedParameters` fail the build. There is no root lint or frontend test script
 - `cargo check --locked` and `cargo clippy --locked --all-targets` in `src-tauri` — CI's Rust gates
+- `src-tauri/src/diagnostics.rs` — read-only machine snapshot behind `get_diagnostics` and Settings → About → Copy Diagnostics. It exists so a bug report carries the reporter's monitor layout, shell class state and crash marker instead of guessing. Collection must stay read-only: never call `set_taskbar_visibility`, never set `TRAY_INTERACTION_ACTIVE`, never touch Explorer. `REPORTED_SETTINGS` is an allow-list for the same reason — a full settings dump would leak `bloom-weather-city`
 - `cargo test --locked` in `src-tauri` — pure-function unit tests. Fast on Windows; CI runs it alongside `check` and `clippy`
 - `bun test scripts/` — frontend test (`scripts/dockApps.test.ts`), also in CI. There is still no general frontend test runner or lint script
 - `bun run bump <x.y.z>` — bumps `package.json`, `tauri.conf.json`, `Cargo.toml`, `Cargo.lock` together

@@ -830,6 +830,15 @@ export function useSettings() {
 		// Utilities
 		restartBloom: () => invoke("restart_bloom"),
 		resetToDefaults,
-		quitBloom: () => invoke("quit_bloom")
+		quitBloom: () => invoke("quit_bloom"),
+		copyDiagnostics: async (): Promise<string> => {
+			const report = await invoke<Record<string, unknown>>("get_diagnostics");
+			const text = JSON.stringify(report, null, 2);
+			// Uses the WebView clipboard so no new Tauri plugin or capability
+			// entry is needed. Nothing leaves the machine: the user pastes the
+			// text into an issue themselves.
+			await navigator.clipboard.writeText(text);
+			return text;
+		}
 	};
 }

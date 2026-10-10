@@ -233,6 +233,7 @@ function SettingsApp() {
 							importStatus={settings.importStatus}
 							handleExportSettings={settings.handleExportSettings}
 							handleImportSettings={settings.handleImportSettings}
+							copyDiagnostics={settings.copyDiagnostics}
 						/>
 					)}
 				</div>

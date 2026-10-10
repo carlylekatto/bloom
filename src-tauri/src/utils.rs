@@ -72,6 +72,16 @@ pub fn taskbar_marker_exists() -> bool {
     TASKBAR_MARKER.get().is_some_and(|p| p.exists())
 }
 
+/// The taskbar state recorded before Bloom forced auto-hide, or `None` when no
+/// marker survives. Read by diagnostics so a report can show what the next
+/// launch would restore, not merely that a marker exists.
+pub fn taskbar_marker_state() -> Option<i32> {
+    TASKBAR_MARKER
+        .get()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|contents| parse_marker_state(&contents))
+}
+
 /// The marker records the user's own taskbar state (`ABM_GETSTATE`) from
 /// before Bloom forced auto-hide, so a crash can't lose it. Markers written by
 /// older versions only contain "1" and carry no state.
@@ -921,6 +931,26 @@ pub fn capture_hwnd_to_base64(hwnd: HWND, max_width: u32, max_height: u32) -> Op
 #[cfg(test)]
 mod tests {
     use super::{expand_env_vars, marker_contents, parse_marker_state};
+
+    // Guards the diagnostics allow-list against silent drift: a key that is not
+    // a plain layout or appearance setting must not be reported, or a pasted
+    // report starts leaking the user's city or pinned app paths.
+    #[test]
+    fn reported_settings_carry_nothing_user_supplied() {
+        for key in crate::diagnostics::REPORTED_SETTINGS {
+            let lower = key.to_lowercase();
+            // Matched as whole words or trailing segments. Substring matching
+            // trips over unrelated keys like bloom-theme-opacITy containing "lat".
+            for forbidden in ["city", "lat", "lon", "path", "icon", "app", "weather", "cached"] {
+                let hit = lower
+                    .split('_')
+                    .any(|segment| segment == forbidden)
+                    || lower.ends_with(&format!("-{forbidden}"))
+                    || lower.ends_with(&format!("_{forbidden}"));
+                assert!(!hit, "{key} looks like it could carry user-supplied data");
+            }
+        }
+    }
 
     #[test]
     fn taskbar_marker_round_trips_the_original_state() {

@@ -1,4 +1,5 @@
-import { Download, RefreshCw, FileDown, Upload } from "lucide-react";
+import { useState } from "react";
+import { Download, RefreshCw, FileDown, Upload, Stethoscope } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { GithubIcon } from "../icons";
 import { SettingRow } from "./SettingRow";
@@ -15,6 +16,7 @@ interface AboutTabProps {
 	importStatus: string;
 	handleExportSettings: () => void;
 	handleImportSettings: () => void;
+	copyDiagnostics: () => Promise<unknown>;
 }
 
 export function AboutTab({
@@ -28,8 +30,32 @@ export function AboutTab({
 	exportStatus,
 	importStatus,
 	handleExportSettings,
-	handleImportSettings
+	handleImportSettings,
+	copyDiagnostics
 }: AboutTabProps) {
+	const [diagnosticsStatus, setDiagnosticsStatus] = useState<"idle" | "copied" | "error">(
+		"idle"
+	);
+
+	const handleCopyDiagnostics = async () => {
+		setDiagnosticsStatus("idle");
+		try {
+			await copyDiagnostics();
+			setDiagnosticsStatus("copied");
+			setTimeout(() => setDiagnosticsStatus("idle"), 2500);
+		} catch (e) {
+			console.error("Diagnostics copy failed:", e);
+			setDiagnosticsStatus("error");
+			setTimeout(() => setDiagnosticsStatus("idle"), 3000);
+		}
+	};
+
+	const getDiagnosticsLabel = () => {
+		if (diagnosticsStatus === "copied") return "Copied!";
+		if (diagnosticsStatus === "error") return "Copy failed";
+		return "Copy Diagnostics";
+	};
+
 	const getUpdateLabel = () => {
 		switch (updateStatus) {
 			case "checking":
@@ -118,8 +144,15 @@ export function AboutTab({
 					label={getImportLabel()}
 					desc="Load settings from a file"
 					action
-					divider={false}
 					onClick={handleImportSettings}
+				/>
+				<SettingRow
+					icon={Stethoscope}
+					label={getDiagnosticsLabel()}
+					desc="Copy a system report for bug reports"
+					action
+					divider={false}
+					onClick={handleCopyDiagnostics}
 				/>
 			</div>
 		</div>
