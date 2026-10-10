@@ -37,6 +37,15 @@ body:
     validations:
       required: true
 
+  - type: input
+    id: monitors
+    attributes:
+      label: Number of monitors
+      description: How many displays are connected, including any second screen.
+      placeholder: "1"
+    validations:
+      required: false
+
   - type: textarea
     id: description
     attributes:
@@ -55,6 +64,21 @@ body:
         3. See error
     validations:
       required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Optional, but it usually answers the question faster than a back-and-forth. In Bloom go to Settings → About → Copy Diagnostics, then paste it here. It contains your Windows build, monitor layout, and shell state — no file paths, no app names, and nothing is sent anywhere.
+      placeholder: |
+        {
+          "os": { "display_version": "26H2", "current_build": "26300", "ubr": "9457" },
+          "monitors": [ { "primary": true, "width": 2560, "scale_factor": 1.25 } ],
+          "shell": { "shell_traywnd_found": true },
+          "marker": { "present": false }
+        }
+    validations:
+      required: false
 
   - type: textarea
     id: media

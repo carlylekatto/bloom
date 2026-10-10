@@ -173,9 +173,12 @@ hidden after Bloom is gone.
    (`taskbar_hidden.flag` in `%APPDATA%\com.sehaz.bloom\`) whenever it hides
    the taskbar, and the next launch reads that marker and hands the taskbar
    back before doing anything else.
-3. **Restart Explorer.** Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Esc</kbd>
-   to open Task Manager, pick **Windows Explorer**, then **Restart**. This
-   works with no taskbar at all and rebuilds it from scratch.
+3. **Restart Explorer.** First make sure Bloom is not running - while it is,
+   it re-hides the taskbar within about a tenth of a second, so restarting
+   Explorer will appear to do nothing. Close Bloom, then press
+   <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Esc</kbd> to open Task Manager, pick
+   **Windows Explorer**, and choose **Restart**. This works with no taskbar at
+   all and rebuilds it from scratch.
 
 If none of those work, restarting Windows clears it too.
 
@@ -186,6 +189,10 @@ window close handler, and the console close handler — restores the taskbar
 before exiting. Turning the Dock off in Settings does the same. `End task` in
 Task Manager sends `TerminateProcess`, which skips all cleanup code, so the
 marker file is the only thing that survives.
+
+While Bloom is running it keeps re-hiding the taskbar on a ~150ms loop, so a
+step above will look like it did nothing if Bloom is still alive. Close Bloom
+first, then retry.
 
 If you hit this, please [open an issue](https://github.com/carlylekatto/bloom/issues)
 with your Bloom version, your Windows version, and how Bloom was killed. A taskbar
