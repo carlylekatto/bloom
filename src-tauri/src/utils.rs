@@ -788,7 +788,36 @@ pub fn re_assert_topmost(hwnd: HWND) {
     }
 }
 
-/// Captures an HWND to a base64-encoded PNG thumbnail, scaling it down if it exceeds max_width x max_height.
+/// Whether the window is minimized or fully occluded. Both cases make a
+/// repaint pointless: there is nothing on screen to repair, and forcing one
+/// can un-minimize or flash a window the user cannot see.
+fn is_window_hidden(hwnd: HWND) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindowVisible};
+    unsafe { IsIconic(hwnd).as_bool() || !IsWindowVisible(hwnd).as_bool() }
+}
+
+/// Diagnostic switch: `BLOOM_NO_CAPTURE=1` skips PrintWindow entirely so no
+/// target window is sent WM_PRINT.
+///
+/// It returns a flat placeholder rather than `None` on purpose. Returning
+/// `None` drops the whole preview card in `Dock.tsx`
+/// (`captured.length > 0` gates rendering), which leaves nothing to click — the
+/// test then cannot reproduce the gesture it exists to test. A placeholder
+/// keeps the card clickable while guaranteeing no window is harmed.
+fn capture_disabled() -> bool {
+    static DISABLED: OnceLock<bool> = OnceLock::new();
+    *DISABLED.get_or_init(|| std::env::var_os("BLOOM_NO_CAPTURE").is_some())
+}
+
+/// A small solid dark PNG used as the placeholder while capture is off. Carries
+/// the same `data:` prefix the real capture path emits, so the frontend cannot
+/// tell the two apart and renders it normally.
+fn placeholder_thumbnail() -> String {
+    // 4x4 opaque grey PNG.
+    const B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAFklEQVR42mNk+M9QzzCKRsEoGgWjYBQAAF9wAgF7pVvUAAAAASUVORK5CYII=";
+    format!("data:image/png;base64,{B64}")
+}
+
 pub fn capture_hwnd_to_base64(hwnd: HWND, max_width: u32, max_height: u32) -> Option<String> {
     unsafe {
         use windows::Win32::Foundation::RECT;
@@ -838,11 +867,43 @@ pub fn capture_hwnd_to_base64(hwnd: HWND, max_width: u32, max_height: u32) -> Op
             return None;
         }
 
+        if capture_disabled() {
+            return Some(placeholder_thumbnail());
+        }
         let hdc_screen = GetDC(None);
         let hdc_mem = CreateCompatibleDC(Some(hdc_screen));
         let hbm_mem = CreateCompatibleBitmap(hdc_screen, width, height);
         let h_old = SelectObject(hdc_mem, hbm_mem.into());
         let success = PrintWindow(hwnd, hdc_mem, 2);
+
+        // PW_RENDERFULLCONTENT leaves Chromium-based targets (Discord, most
+        // Electron apps, VS Code) with a black, unrepainted surface: the
+        // window stays dark even after it is focused, so its caption buttons go
+        // dead too. Nothing in the capture path asks for a repaint, so the
+        // damage persists. Ask for one explicitly.
+        //
+        // Off-thread on purpose. `UpdateWindow` sends WM_PAINT and waits for the
+        // target app to finish drawing; doing that inline held up the pixel
+        // read and made previews feel slower. The repair is a side effect nobody
+        // is waiting on, so it has no business sitting in this critical path.
+        if success != 0 {
+            // HWND is a raw pointer and not Send; carry the address as an
+            // integer across the thread boundary, as main.rs does for its own
+            // off-thread window work.
+            let hwnd_addr = hwnd.0 as isize;
+            std::thread::spawn(move || {
+                let hwnd = HWND(hwnd_addr as *mut _);
+                if is_window_hidden(hwnd) {
+                    // Repainting a minimized or fully occluded window is wasted
+                    // work and can un-minimize or flash a window the user
+                    // cannot see.
+                    return;
+                }
+                use windows::Win32::Graphics::Gdi::{InvalidateRect, UpdateWindow};
+                let _ = InvalidateRect(Some(hwnd), None, false);
+                let _ = UpdateWindow(hwnd);
+            });
+        }
 
         let mut result = None;
         if success != 0 {

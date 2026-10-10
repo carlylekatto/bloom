@@ -173,6 +173,13 @@ const Dock = memo(function Dock() {
 	const iconPickerTargetRef = useRef<string | null>(null);
 	const toastTimerRef = useRef<any>(null);
 	const dockRef = useRef<HTMLDivElement>(null);
+	// The preview card's real box. The dock hit region used to be guessed with
+	// hardcoded padding, which was both far larger than the card and unstable
+	// whenever the preview opened or closed: the oversized guess made the dock
+	// swallow clicks on transparent pixels, and the resize on every preview
+	// change reset the cursor dwell, so moving between an app's windows needed
+	// several attempts. Measuring removes both problems.
+	const previewRef = useRef<HTMLDivElement>(null);
 	const [popupBottom, setPopupBottom] = useState(56);
 	const pinnedItemsRef = useRef<AppInfo[]>([]);
 	const handleAppClickRef = useRef<(app: AppInfo) => void>(() => {});
@@ -274,26 +281,53 @@ const Dock = memo(function Dock() {
 
 	useEffect(() => {
 		const updateRect = () => {
-			if (dockRef.current) {
-				const rect = dockRef.current.getBoundingClientRect();
-				const hasPreview = !!previewData;
-				invoke("update_dock_rect", {
-					rect: {
-						x: Math.round(rect.x) - (hasPreview ? 500 : 0),
-						y: Math.round(rect.y) - (hasPreview ? 320 : 0),
-						width: Math.round(rect.width) + (hasPreview ? 1000 : 0),
-						height: Math.round(rect.height) + (hasPreview ? 320 : 0)
-					}
-				}).catch(() => {});
-			}
+			if (!dockRef.current) return;
+			const pill = dockRef.current.getBoundingClientRect();
+			// Union the pill with the preview card when one is actually on
+			// screen. Both boxes are measured, never assumed: the card's size
+			// depends on how many windows the app has and how wide they render,
+			// so any fixed padding was wrong for every app except by accident.
+			// `previewRef` is briefly stale while the exit animation plays, in
+			// which case the pill alone is the correct region.
+			const card = previewRef.current?.getBoundingClientRect();
+			const hasCard = !!card && card.width > 0 && card.height > 0;
+
+			invoke("update_dock_rect", {
+				rect: {
+					x: Math.round(hasCard ? Math.min(pill.x, card.x) : pill.x),
+					y: Math.round(hasCard ? Math.min(pill.y, card.y) : pill.y),
+					width: Math.round(
+						hasCard ? Math.max(pill.right, card.right) - Math.min(pill.x, card.x) : pill.width
+					),
+					height: Math.round(
+						hasCard
+							? Math.max(pill.bottom, card.bottom) - Math.min(pill.y, card.y)
+							: pill.height
+					)
+				}
+			}).catch(() => {});
 		};
 
 		updateRect();
+
+		// The card scales and fades in over ~150ms, so a measurement taken now
+		// reads a box still mid-animation. Track the card's settled layout
+		// instead of every frame of the tween: a hit region that jitters with
+		// the animation resets the cursor dwell and makes an app feel
+		// unclickable while it is visibly open. One re-measure after the
+		// transition covers it.
+		const settle = setTimeout(updateRect, 220);
+
 		window.addEventListener("resize", updateRect);
 		const observer = new ResizeObserver(updateRect);
 		if (dockRef.current) observer.observe(dockRef.current);
+		// ResizeObserver reports content-box changes, so this fires when the
+		// window count changes (one thumbnail becomes three) but not while the
+		// card merely animates — which is exactly the distinction needed.
+		if (previewRef.current) observer.observe(previewRef.current);
 
 		return () => {
+			clearTimeout(settle);
 			window.removeEventListener("resize", updateRect);
 			observer.disconnect();
 		};
@@ -888,12 +922,22 @@ const Dock = memo(function Dock() {
 							})
 						);
 
+						// Order follows the hwnd list as given, not focus recency.
+						// Sorting by lastFocused made every instance slide down one
+						// slot whenever a neighbour was hovered, so the row churned
+						// under the cursor and the window you were aiming at kept
+						// moving. A stable order is easier to hit on the first try.
+						// `lastFocused` is still destructured away below: the backend
+						// sends it, the preview no longer reads it.
 						const captured = results
 							.filter(
-								(r): r is { hwnd: number; title: string; image: string; lastFocused: number } =>
-									r !== null
+								(r): r is {
+									hwnd: number;
+									title: string;
+									image: string;
+									lastFocused: number;
+								} => r !== null
 							)
-							.sort((a, b) => b.lastFocused - a.lastFocused)
 							.map(({ hwnd, title, image }) => ({ hwnd, title, image }));
 
 						const currentHovered = hoveredAppRef.current;
@@ -1092,6 +1136,7 @@ const Dock = memo(function Dock() {
 														previewData.id === itemKey(app) &&
 														hoveredApp === itemKey(app) && (
 															<motion.div
+																ref={previewRef}
 																className={`preview-tooltip ${previewData.previews.length > 1 ? "multi" : ""}`}
 																initial={{ opacity: 0, y: 10, scale: 0.95 }}
 																animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -1256,6 +1301,7 @@ const Dock = memo(function Dock() {
 												previewData.id === itemKey(app) &&
 												hoveredApp === itemKey(app) && (
 													<motion.div
+														ref={previewRef}
 														className={`preview-tooltip ${previewData.previews.length > 1 ? "multi" : ""}`}
 														initial={{ opacity: 0, y: 10, scale: 0.95 }}
 														animate={{ opacity: 1, y: 0, scale: 1 }}

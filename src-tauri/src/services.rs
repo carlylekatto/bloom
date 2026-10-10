@@ -2107,6 +2107,49 @@ const TOP_EDGE_POLL_MS: u64 = 40;
 static MH_TOP_EDGE_ENTER_MS: AtomicI64 = AtomicI64::new(0);
 static MH_TOP_EDGE_ARMED: AtomicBool = AtomicBool::new(false);
 
+/// Whether the cursor is over the dock's own visual rect, plus that rect's
+/// horizontal span for the bottom-edge reveal. Split out of the mouse hook so
+/// the dwell watchdog can re-test with the current cursor position, which the
+/// hook cannot supply: it only runs when the cursor moves.
+fn dock_region_hit(
+    dock_win: &tauri::WebviewWindow,
+    cursor: windows::Win32::Foundation::POINT,
+) -> (bool, Option<(i32, i32)>) {
+    let Some((win_pos, win_size)) = DOCK_WINDOW_RECT.lock().ok().and_then(|g| *g) else {
+        return (false, None);
+    };
+    let in_window = cursor.x >= win_pos.x
+        && cursor.x <= (win_pos.x + win_size.width as i32)
+        && cursor.y >= win_pos.y
+        && cursor.y <= (win_pos.y + win_size.height as i32);
+    if !in_window {
+        return (false, None);
+    }
+    let Ok(region) = DOCK_RECT.try_lock() else {
+        return (false, None);
+    };
+    let Some(r) = *region else {
+        return (false, None);
+    };
+    let scale = dock_win.scale_factor().unwrap_or(1.0);
+    let pad_x = (5.0 * scale) as i32;
+    let pad_y_top = (8.0 * scale) as i32;
+    let pad_y_bottom = (5.0 * scale) as i32;
+    // Hysteresis keeps the dock interactive a little past its bounds once
+    // grabbed, so a pointer jitter at the boundary cannot drop input.
+    let hyst = if MH_LAST_DOCK_IGNORE.load(Ordering::Relaxed) == 0 {
+        (10.0 * scale) as i32
+    } else {
+        0
+    };
+    let rx = win_pos.x + (r.x as f64 * scale) as i32 - pad_x - hyst;
+    let ry = win_pos.y + (r.y as f64 * scale) as i32 - pad_y_top - hyst;
+    let rw = (r.width as f64 * scale) as i32 + (pad_x * 2) + (hyst * 2);
+    let rh = (r.height as f64 * scale) as i32 + pad_y_top + pad_y_bottom + (hyst * 2);
+    let over = cursor.x >= rx && cursor.x <= (rx + rw) && cursor.y >= ry && cursor.y <= (ry + rh);
+    (over, Some((rx, rx + rw)))
+}
+
 /// Physical bounds `(x, y, width, height)` of the expanded per-app volume
 /// mixer (notch + panel), if it is open. The frontend reports the card in
 /// overlay CSS pixels; scale and monitor offset convert it to virtual-desktop
@@ -2578,9 +2621,14 @@ unsafe extern "system" fn mouse_hook_proc(
                 }
             } else if let Some(dock_win) = app_handle.get_webview_window("dock") {
                 if dock_win.is_visible().unwrap_or(false) {
-                    let mut is_click_interactive = false;
+                    let (over_dock_region, dock_span) = dock_region_hit(&dock_win, cursor);
+
+                    // The dwell gate applies only to the plain "cursor is over the
+                    // dock" case. A menu being open, or approaching along the
+                    // bottom edge to trigger the reveal, both need the input
+                    // immediately — the cursor is demonstrably already there.
+                    let mut is_click_interactive = over_dock_region;
                     let mut is_hovered = false;
-                    let mut dock_span: Option<(i32, i32)> = None;
 
                     let dock_rect_val = DOCK_WINDOW_RECT.lock().ok().and_then(|g| *g);
 
@@ -2590,60 +2638,27 @@ unsafe extern "system" fn mouse_hook_proc(
                             && cursor.y >= win_pos.y
                             && cursor.y <= (win_pos.y + win_size.height as i32);
 
-                        if in_window {
-                            if let Ok(region) = DOCK_RECT.try_lock() {
-                                if let Some(r) = *region {
+                        if in_window
+                            && !is_click_interactive
+                            && MENU_IS_OPEN.load(Ordering::Relaxed)
+                        {
+                            if let Ok(rect) = MENU_RECT.try_lock() {
+                                if let Some(r) = *rect {
                                     let scale = dock_win.scale_factor().unwrap_or(1.0);
-                                    let pad_x = (5.0 * scale) as i32;
-                                    let pad_y_top = (8.0 * scale) as i32;
-                                    let pad_y_bottom = (5.0 * scale) as i32;
-                                    // Hysteresis keeps the dock interactive a little past
-                                    // its bounds once grabbed, so removing the edge-forced
-                                    // interactivity doesn't reintroduce boundary flicker.
-                                    let hyst = if MH_LAST_DOCK_IGNORE.load(Ordering::Relaxed) == 0 {
-                                        (10.0 * scale) as i32
-                                    } else {
-                                        0
-                                    };
-                                    let rx = win_pos.x + (r.x as f64 * scale) as i32 - pad_x - hyst;
-                                    let ry =
-                                        win_pos.y + (r.y as f64 * scale) as i32 - pad_y_top - hyst;
+                                    let rx = win_pos.x + (r.x as f64 * scale) as i32
+                                        - (5.0 * scale) as i32;
+                                    let ry = win_pos.y + (r.y as f64 * scale) as i32
+                                        - (5.0 * scale) as i32;
                                     let rw =
-                                        (r.width as f64 * scale) as i32 + (pad_x * 2) + (hyst * 2);
-                                    let rh = (r.height as f64 * scale) as i32
-                                        + pad_y_top
-                                        + pad_y_bottom
-                                        + (hyst * 2);
+                                        (r.width as f64 * scale) as i32 + (10.0 * scale) as i32;
+                                    let rh =
+                                        (r.height as f64 * scale) as i32 + (10.0 * scale) as i32;
                                     if cursor.x >= rx
                                         && cursor.x <= (rx + rw)
                                         && cursor.y >= ry
                                         && cursor.y <= (ry + rh)
                                     {
                                         is_click_interactive = true;
-                                    }
-                                    dock_span = Some((rx, rx + rw));
-                                }
-                            }
-
-                            if !is_click_interactive && MENU_IS_OPEN.load(Ordering::Relaxed) {
-                                if let Ok(rect) = MENU_RECT.try_lock() {
-                                    if let Some(r) = *rect {
-                                        let scale = dock_win.scale_factor().unwrap_or(1.0);
-                                        let rx = win_pos.x + (r.x as f64 * scale) as i32
-                                            - (5.0 * scale) as i32;
-                                        let ry = win_pos.y + (r.y as f64 * scale) as i32
-                                            - (5.0 * scale) as i32;
-                                        let rw =
-                                            (r.width as f64 * scale) as i32 + (10.0 * scale) as i32;
-                                        let rh = (r.height as f64 * scale) as i32
-                                            + (10.0 * scale) as i32;
-                                        if cursor.x >= rx
-                                            && cursor.x <= (rx + rw)
-                                            && cursor.y >= ry
-                                            && cursor.y <= (ry + rh)
-                                        {
-                                            is_click_interactive = true;
-                                        }
                                     }
                                 }
                             }
