@@ -25,7 +25,7 @@ Run from the repo root unless noted. Bun 1.4.0, Rust stable.
 
 ## Settings
 
-- Stored in `%APPDATA%/bloom/settings.json` as a flat object of `bloom-`-prefixed keys; all values are strings (`"true"`/`"false"` for booleans). `SETTINGS.md` documents every key
+- Stored in `%APPDATA%/com.sehaz.bloom/settings.json` as a flat object of `bloom-`-prefixed keys; all values are strings (`"true"`/`"false"` for booleans). `SETTINGS.md` documents every key
 - UI write path: set `localStorage`, then `invoke("save_setting")` → backend caches it and emits `settings-changed`. External file edits are watched and emitted as `settings-external-changed`
 - `src/hooks/useSettingsSync.ts` is the single sync hook for both events and normalizes string booleans/numbers
 - The CSP in `tauri.conf.json` allow-lists network origins (weather APIs only); add new origins there. New Tauri plugins also need permissions in `capabilities/default.json`
@@ -33,5 +33,7 @@ Run from the repo root unless noted. Bun 1.4.0, Rust stable.
 ## Gotchas
 
 - The app hides the native Windows taskbar and registers AppBars while running. Any new exit/restart path must restore the taskbar and unregister AppBars, like the tray menu in `main.rs` does. A marker file restores it after a crash
+- This is a fork of `SehajveerSingh2005/bloom` and still ships the upstream `com.sehaz.bloom` identifier, so it shares `app_config_dir` (`settings.json`, `updater.json`, the taskbar marker) with an installed upstream build. Debug builds use a separate single-instance mutex (`BloomDevSingleInstance`) so both can run at once; release builds keep the shipped name. Changing the identifier later means migrating those files
+- If the taskbar is hidden and the app is gone, the marker file is the only recovery path — see the "If your taskbar is missing" section in `README.md`. Keep any new code that hides the taskbar writing and clearing that marker
 - The `windows` crate is pinned to 0.61 with an explicit feature list in `Cargo.toml`; add features there when using new Win32 APIs
 - Commits follow conventional commits (`feat:`, `fix:`); release notes are generated from them and commits touching only `website/*`, `.github/*`, or `*.md` are filtered out

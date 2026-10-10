@@ -1,6 +1,6 @@
 # Bloom Settings Reference
 
-All settings are stored in `settings.json` in the app config directory (`%APPDATA%/bloom/`). The file is a flat JSON object with `bloom-` prefixed keys. Bloom watches this file for external changes and applies them in real-time.
+All settings are stored in `settings.json` in the app config directory (`%APPDATA%/com.sehaz.bloom/`, from the `com.sehaz.bloom` identifier). The file is a flat JSON object with `bloom-` prefixed keys. Bloom watches this file for external changes and applies them in real-time.
 
 ## Quick Start
 

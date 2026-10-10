@@ -158,6 +158,41 @@ You'll need [Rust](https://rustup.rs/) and [Bun](https://bun.sh/). That's it.
 
 ---
 
+## If your taskbar is missing
+
+Bloom hides the Windows taskbar on purpose — that's how it takes its place. If
+Bloom is killed without a clean shutdown (Task Manager's **End task**, Explorer
+crashing while a tray menu was open, or a power loss), the taskbar can stay
+hidden after Bloom is gone.
+
+1. **If Bloom is still running**, open **Settings → General** and turn **Dock**
+   off (or use **Quit Bloom**). Turning the Dock off hands the taskbar back to
+   Windows right away — left-clicking Bloom's tray icon opens Settings.
+2. **Relaunch Bloom.** Press <kbd>Win</kbd>, type `bloom`, press
+   <kbd>Enter</kbd>. Bloom leaves a small marker file
+   (`taskbar_hidden.flag` in `%APPDATA%\com.sehaz.bloom\`) whenever it hides
+   the taskbar, and the next launch reads that marker and hands the taskbar
+   back before doing anything else.
+3. **Restart Explorer.** Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Esc</kbd>
+   to open Task Manager, pick **Windows Explorer**, then **Restart**. This
+   works with no taskbar at all and rebuilds it from scratch.
+
+If none of those work, restarting Windows clears it too.
+
+### Why this can happen at all
+
+Every normal exit path in Bloom — the tray menu, the in-app Quit button, the
+window close handler, and the console close handler — restores the taskbar
+before exiting. Turning the Dock off in Settings does the same. `End task` in
+Task Manager sends `TerminateProcess`, which skips all cleanup code, so the
+marker file is the only thing that survives.
+
+If you hit this, please [open an issue](https://github.com/carlylekatto/bloom/issues)
+with your Bloom version, your Windows version, and how Bloom was killed. A taskbar
+that won't come back means something broke in a path we didn't cover.
+
+---
+
 ## Contributing
 
 Bloom is open source.
