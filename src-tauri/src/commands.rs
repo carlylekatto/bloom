@@ -751,31 +751,13 @@ pub async fn get_active_windows() -> Vec<AppInfo> {
             }
         }
 
-        let focus_guard = if let Some(map) = crate::state::FOCUS_TIMESTAMPS.get() {
-            map.lock().ok()
-        } else {
-            None
-        };
+        let result_apps: Vec<AppInfo> = grouped.into_values().collect();
 
-        let mut result_apps: Vec<AppInfo> = grouped.into_values().collect();
-
-        for app in &mut result_apps {
-            if let Some(ref mut hwnds) = app.all_hwnds {
-                hwnds.sort_by(|a, b| {
-                    let ts_a = focus_guard
-                        .as_ref()
-                        .and_then(|g| g.get(&a.0))
-                        .copied()
-                        .unwrap_or(0);
-                    let ts_b = focus_guard
-                        .as_ref()
-                        .and_then(|g| g.get(&b.0))
-                        .copied()
-                        .unwrap_or(0);
-                    ts_b.cmp(&ts_a)
-                });
-            }
-        }
+        // Intentionally left in window-enumeration order. The dock draws one
+        // preview per hwnd in this order, and sorting by focus recency made
+        // every window slide one slot whenever a neighbour was hovered, so the
+        // row moved under the cursor exactly when the user reached for it.
+        // A stable order is easier to hit on the first try.
 
         if com_initialized {
             unsafe {

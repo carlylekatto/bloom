@@ -2108,9 +2108,10 @@ static MH_TOP_EDGE_ENTER_MS: AtomicI64 = AtomicI64::new(0);
 static MH_TOP_EDGE_ARMED: AtomicBool = AtomicBool::new(false);
 
 /// Whether the cursor is over the dock's own visual rect, plus that rect's
-/// horizontal span for the bottom-edge reveal. Split out of the mouse hook so
-/// the dwell watchdog can re-test with the current cursor position, which the
-/// hook cannot supply: it only runs when the cursor moves.
+/// horizontal span for the bottom-edge reveal. Extracted from the mouse hook so
+/// the hit test can be read as one unit: the geometry, the hysteresis and the
+/// span are three things that must move together, and inlining them made it look
+/// like more logic than it is.
 fn dock_region_hit(
     dock_win: &tauri::WebviewWindow,
     cursor: windows::Win32::Foundation::POINT,
@@ -2623,10 +2624,6 @@ unsafe extern "system" fn mouse_hook_proc(
                 if dock_win.is_visible().unwrap_or(false) {
                     let (over_dock_region, dock_span) = dock_region_hit(&dock_win, cursor);
 
-                    // The dwell gate applies only to the plain "cursor is over the
-                    // dock" case. A menu being open, or approaching along the
-                    // bottom edge to trigger the reveal, both need the input
-                    // immediately — the cursor is demonstrably already there.
                     let mut is_click_interactive = over_dock_region;
                     let mut is_hovered = false;
 
