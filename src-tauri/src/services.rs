@@ -615,6 +615,18 @@ unsafe extern "system" fn thumbnail_capture_proc(
             }
         }
 
+        // Serialize captures. This hook fires per restore event and, unlike the
+        // focus hook, had no in-flight guard: two restore events 25ms apart both
+        // found a stale cache, both passed, and two PrintWindow calls then ran
+        // concurrently against the same HWND. Two overlapping WM_PRINT sequences
+        // on one Chromium renderer is exactly the kind of thing that leaves a
+        // surface unusable. The 300ms freshness check above cannot catch this,
+        // because neither call has written its result yet.
+        if THUMB_CAPTURE_IN_FLIGHT.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        let _guard = ThumbnailCaptureGuard;
+
         let hwnd = HWND(hwnd_raw as *mut _);
         if let Some(img) = crate::utils::capture_hwnd_to_base64(hwnd, 320, 200) {
             if let Some(cache) = crate::state::THUMBNAIL_CACHE.get() {
@@ -2534,6 +2546,45 @@ fn setup_top_edge_watchdog(app_handle: AppHandle) {
         let fg_fs = CURRENT_FOREGROUND_FULLSCREEN.load(Ordering::Relaxed);
         update_main_interaction(&app_handle, pt, now_ms(), fg_fs);
     });
+}
+
+/// Re-decides whether the dock swallows cursor input, using the cursor's
+/// current position.
+///
+/// The mouse hook only re-evaluates on WM_MOUSEMOVE, but the dock's hit region
+/// grows the instant a preview card mounts — under a pointer that is already
+/// resting there and no longer moving. Nothing fired, so the dock stayed
+/// click-through and the next click went to the window behind it. That is why
+/// clicking quickly was unreliable while clicking deliberately worked.
+///
+/// Called when the frontend reports a new dock rect. No polling thread and no
+/// added delay: the decision is only made when its input actually changed.
+pub fn sync_dock_click_through(app: &AppHandle) {
+    let Some(dock_win) = app.get_webview_window("dock") else {
+        return;
+    };
+    if !dock_win.is_visible().unwrap_or(false) {
+        return;
+    }
+    if SHUTTING_DOWN.load(Ordering::Relaxed) {
+        return;
+    }
+    let mut pt = windows::Win32::Foundation::POINT::default();
+    if unsafe { windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt) }.is_err() {
+        return;
+    }
+    let (over, _) = dock_region_hit(&dock_win, pt);
+    let should_ignore = !over && !MENU_IS_OPEN.load(Ordering::Relaxed);
+    let prev = MH_LAST_DOCK_IGNORE.load(Ordering::Relaxed);
+    let new_ignore = if should_ignore { 1 } else { 0 };
+    if prev == new_ignore {
+        return;
+    }
+    if let Ok(hwnd) = dock_win.hwnd() {
+        re_assert_topmost(hwnd);
+    }
+    let _ = dock_win.set_ignore_cursor_events(should_ignore);
+    MH_LAST_DOCK_IGNORE.store(new_ignore, Ordering::Relaxed);
 }
 
 unsafe extern "system" fn mouse_hook_proc(

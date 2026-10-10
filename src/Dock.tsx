@@ -592,7 +592,7 @@ const Dock = memo(function Dock() {
 				// Several windows: bring the most recent forward, then cycle.
 				await invoke("focus_app_windows", { hwnds: app.all_hwnds.map(([hwnd]) => hwnd) });
 			} else if (app.hwnd) {
-				await invoke("focus_window", { hwnd: app.hwnd });
+				await invoke("focus_window", { hwnd: app.hwnd, explicitWindow: false });
 			} else {
 				await invoke("open_app", { appName: app.path });
 			}
@@ -1156,7 +1156,12 @@ const Dock = memo(function Dock() {
 																		<div
 																			key={prev.hwnd}
 																			className="preview-item"
-																			onClick={() => invoke("focus_window", { hwnd: prev.hwnd })}
+																			onClick={() =>
+														invoke("focus_window", {
+															hwnd: prev.hwnd,
+															explicitWindow: true
+														})
+													}
 																		>
 																			<img src={prev.image} alt={`Preview ${idx}`} />
 																			<div className="preview-label">{prev.title || app.name}</div>
@@ -1321,7 +1326,12 @@ const Dock = memo(function Dock() {
 																<div
 																	key={prev.hwnd}
 																	className="preview-item"
-																	onClick={() => invoke("focus_window", { hwnd: prev.hwnd })}
+																	onClick={() =>
+														invoke("focus_window", {
+															hwnd: prev.hwnd,
+															explicitWindow: true
+														})
+													}
 																>
 																	<img src={prev.image} alt={`Preview ${idx}`} />
 																	<div className="preview-label">{prev.title || app.name}</div>

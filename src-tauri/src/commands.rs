@@ -38,10 +38,14 @@ pub async fn set_notch_visible(visible: bool) {
 }
 
 #[tauri::command]
-pub async fn update_dock_rect(rect: IntRect) {
+pub async fn update_dock_rect(app: AppHandle, rect: IntRect) {
     if let Ok(mut r) = DOCK_RECT.lock() {
         *r = Some(rect);
     }
+    // The hit region just changed under a possibly-stationary cursor. The mouse
+    // hook will not fire until the pointer moves again, so re-decide now or the
+    // first click after a preview opens lands on the window behind the dock.
+    crate::services::sync_dock_click_through(&app);
 }
 
 #[tauri::command]
@@ -751,13 +755,21 @@ pub async fn get_active_windows() -> Vec<AppInfo> {
             }
         }
 
-        let result_apps: Vec<AppInfo> = grouped.into_values().collect();
+        let mut result_apps: Vec<AppInfo> = grouped.into_values().collect();
 
-        // Intentionally left in window-enumeration order. The dock draws one
-        // preview per hwnd in this order, and sorting by focus recency made
-        // every window slide one slot whenever a neighbour was hovered, so the
-        // row moved under the cursor exactly when the user reached for it.
-        // A stable order is easier to hit on the first try.
+        // EnumWindows yields windows in Z-order, which changes every time a
+        // window is raised or focused. Leaving the hwnds in enumeration order
+        // therefore shuffled the dock's preview row a moment after each click,
+        // once the windows-changed poll picked up the new order — long after
+        // the cursor had settled on a target. Sorting by hwnd gives a total
+        // order that is fixed for the life of the window and independent of
+        // focus, stacking or Z-order. The value carries no meaning of its own;
+        // it only has to be stable.
+        for app in &mut result_apps {
+            if let Some(ref mut hwnds) = app.all_hwnds {
+                hwnds.sort_by_key(|entry| entry.0);
+            }
+        }
 
         if com_initialized {
             unsafe {
@@ -771,8 +783,73 @@ pub async fn get_active_windows() -> Vec<AppInfo> {
     .unwrap_or_default()
 }
 
+/// Brings `hwnd` to the foreground reliably from any thread.
+///
+/// `SetForegroundWindow` is gated by the foreground lock: Windows only honours
+/// it for the thread that last received input. This runs on a `spawn_blocking`
+/// worker, so the plain call was refused whenever that worker had not itself
+/// taken input. That refusal is timing-dependent, and surfaced as a click that
+/// sometimes flashes the target window and sometimes does nothing at all.
+///
+/// `AttachThreadInput` joins our thread to the current foreground thread for the
+/// duration, which makes the plain call succeed.
+///
+/// `BringWindowToTop` runs first because that is the half that actually raises a
+/// window owned by another process; `SetForegroundWindow` alone only updates
+/// Z-order bookkeeping.
+fn activate_window(hwnd: HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic,
+        SetForegroundWindow, ShowWindow, SW_RESTORE,
+    };
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+
+    unsafe {
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        let fg = GetForegroundWindow();
+        let fg_thread = if fg.is_invalid() {
+            0
+        } else {
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(fg, Some(&mut pid))
+        };
+        let cur_thread = GetCurrentThreadId();
+        let attached = fg_thread != 0 && fg_thread != cur_thread && AttachThreadInput(cur_thread, fg_thread, true).as_bool();
+
+        let _ = BringWindowToTop(hwnd);
+        let fg_ok = SetForegroundWindow(hwnd).as_bool();
+        crate::utils::dock_log(&format!(
+            "activate hwnd=0x{:x} attached={} SetForegroundWindow={}",
+            hwnd.0 as isize,
+            attached,
+            fg_ok
+        ));
+
+        if attached {
+            let _ = AttachThreadInput(cur_thread, fg_thread, false);
+        }
+    }
+}
+
+/// Brings a window forward.
+///
+/// `explicit_window` distinguishes the two callers, because they want opposite
+/// behaviour when the app already owns the foreground:
+///
+/// - `false` - a dock icon click. Clicking the app you are already using
+///   minimizes it, which is the familiar toggle. The same-process and
+///   recently-focused heuristics below are what make that work for an app with
+///   several windows.
+/// - `true` - a click on one thumbnail in the dock preview. The user has named
+///   the window they want, so app-level inference must not override it. Only
+///   the plain "this exact window is already in front" toggle still applies.
+///   Without this, two browser tabs share one PID, so clicking the second
+///   thumbnail minimized it and left the first looking selected.
 #[tauri::command]
-pub async fn focus_window(hwnd: isize) {
+pub async fn focus_window(hwnd: isize, explicit_window: Option<bool>) {
+    let explicit = explicit_window.unwrap_or(false);
     tauri::async_runtime::spawn_blocking(move || unsafe {
         use windows::Win32::UI::WindowsAndMessaging::{
             GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
@@ -795,7 +872,7 @@ pub async fn focus_window(hwnd: isize) {
 
             if !fg.is_invalid() && fg == hwnd {
                 should_minimize = true;
-            } else if !fg.is_invalid() {
+            } else if !fg.is_invalid() && !explicit {
                 let mut fg_pid = 0u32;
                 let mut target_pid = 0u32;
                 GetWindowThreadProcessId(fg, Some(&mut fg_pid));
@@ -805,7 +882,7 @@ pub async fn focus_window(hwnd: isize) {
                 }
             }
 
-            if !should_minimize {
+            if !should_minimize && !explicit {
                 let now = crate::utils::get_now_ms();
                 should_minimize = if let Some(map) = crate::state::FOCUS_TIMESTAMPS.get() {
                     if let Ok(guard) = map.lock() {
@@ -822,9 +899,19 @@ pub async fn focus_window(hwnd: isize) {
             }
 
             if should_minimize {
+                crate::utils::dock_log(&format!(
+                    "focus hwnd=0x{:x} explicit={} -> MINIMIZE",
+                    hwnd.0 as isize,
+                    explicit
+                ));
                 let _ = ShowWindow(hwnd, SW_MINIMIZE);
             } else {
-                let _ = SetForegroundWindow(hwnd);
+                crate::utils::dock_log(&format!(
+                    "focus hwnd=0x{:x} explicit={} -> ACTIVATE",
+                    hwnd.0 as isize,
+                    explicit
+                ));
+                activate_window(hwnd);
             }
         }
     })
@@ -2834,7 +2921,14 @@ pub async fn capture_window_thumbnail(
             return cached_img.map(|img| (img, focus_time));
         }
 
+        // Freshness now lives inside capture_hwnd_to_base64 so the focus and
+        // minimize hooks are covered too; they call it directly.
         let result = crate::utils::capture_hwnd_to_base64(hwnd, max_width, max_height);
+        crate::utils::dock_log(&format!(
+            "thumbnail hwnd=0x{hwnd_key:x} minimized={} {}",
+            is_minimized,
+            if result.is_some() { "ok" } else { "FAILED" }
+        ));
 
         if let Some(ref img) = result {
             if let Some(cache) = crate::state::THUMBNAIL_CACHE.get() {

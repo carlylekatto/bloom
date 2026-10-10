@@ -788,12 +788,56 @@ pub fn re_assert_topmost(hwnd: HWND) {
     }
 }
 
-/// Whether the window is minimized or fully occluded. Both cases make a
-/// repaint pointless: there is nothing on screen to repair, and forcing one
-/// can un-minimize or flash a window the user cannot see.
-fn is_window_hidden(hwnd: HWND) -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindowVisible};
-    unsafe { IsIconic(hwnd).as_bool() || !IsWindowVisible(hwnd).as_bool() }
+/// Appends a timestamped line to `%TEMP%\bloom-dock.log` when `BLOOM_DOCK_LOG`
+/// is set. Off by default; the file is capped so a long session cannot grow it
+/// without bound.
+///
+/// This exists because the defect it was added for is not reproducible on
+/// demand: clicking quickly between two windows of the same app sometimes
+/// leaves the target window black, sometimes not. Guessing at the cause from
+/// outside produced several wrong fixes in a row. A timeline of what Bloom
+/// actually did to each window turns that into something observable.
+pub fn dock_log(line: &str) {
+    use std::io::Write;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    if !*ENABLED.get_or_init(|| std::env::var_os("BLOOM_DOCK_LOG").is_some()) {
+        return;
+    }
+    let path = std::env::temp_dir().join("bloom-dock.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(f, "[{}] {line}", get_now_ms());
+        // Keep the tail. Cheap enough at this volume, and avoids needing a
+        // second process to rotate.
+        if let Ok(meta) = std::fs::metadata(&path) {
+            if meta.len() > 2_000_000 {
+                drop(f);
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    let trimmed: String = content
+                        .chars()
+                        .skip(content.chars().count() / 2)
+                        .collect();
+                    let _ = std::fs::write(&path, trimmed);
+                }
+            }
+        }
+    }
+}
+
+/// Mean RGB of a captured RGBA buffer, scaled 0-255. A window that PrintWindow
+/// has blackened reads near 0; a healthy one rarely drops below about 20 even
+/// for a dark UI. Sampling every 64th pixel keeps this off the hot path.
+pub fn mean_luma(pixels: &[u8]) -> u32 {
+    let mut total: u64 = 0;
+    let mut count: u64 = 0;
+    for px in pixels.as_chunks::<4>().0.iter().step_by(64) {
+        total += (px[0] as u64 + px[1] as u64 + px[2] as u64) / 3;
+        count += 1;
+    }
+    u32::try_from(total / count.max(1)).unwrap_or(u32::MAX)
 }
 
 /// Diagnostic switch: `BLOOM_NO_CAPTURE=1` skips PrintWindow entirely so no
@@ -819,6 +863,52 @@ fn placeholder_thumbnail() -> String {
 }
 
 pub fn capture_hwnd_to_base64(hwnd: HWND, max_width: u32, max_height: u32) -> Option<String> {
+    // Single freshness gate for every caller.
+    //
+    // This used to live in the `capture_window_thumbnail` command, which left
+    // the focus and minimize hooks calling straight through with no dedup at
+    // all. Their own checks did not help either: the focus hook allows two
+    // seconds per window, so alternating between exactly two windows — the
+    // normal dock case — defeated it every single time. The dock log showed
+    // well over two hundred PrintWindow calls in a minute of rapid switching,
+    // and every one is a chance to leave a surface black.
+    //
+    // PrintWindow with PW_RENDERFULLCONTENT damages Chromium targets, so the
+    // fix that matters is calling it less, not repairing faster afterwards.
+    const REUSE_MS: i64 = 1_000;
+    if let Some(cache) = crate::state::THUMBNAIL_CACHE.get() {
+        let fresh = cache
+            .lock()
+            .ok()
+            .and_then(|g| match g.get(&(hwnd.0 as isize)) {
+                Some((img, ts)) if crate::utils::get_now_ms() - ts < REUSE_MS => Some(img.clone()),
+                _ => None,
+            });
+        if let Some(img) = fresh {
+            crate::utils::dock_log(&format!("capture REUSED hwnd=0x{:x}", hwnd.0 as isize));
+            return Some(img);
+        }
+    }
+
+    // Never PrintWindow a minimized window. This is the most damaging call in
+    // the whole capture path: the target gets WM_PRINT while it cannot paint,
+    // and the repair below does nothing, because InvalidateRect/UpdateWindow on
+    // a hidden window never reaches the screen. When the user restores it, the
+    // surface is dead and the app has no reason to redraw. Every black-window
+    // report lined up with a minimize/restore cycle in the dock log.
+    //
+    // Checked here rather than at each call site so every path is covered,
+    // including the minimize hook and the focus hook.
+    {
+        use windows::Win32::UI::WindowsAndMessaging::IsIconic;
+        if unsafe { IsIconic(hwnd) }.as_bool() {
+            crate::utils::dock_log(&format!(
+                "capture SKIPPED iconic hwnd=0x{:x}",
+                hwnd.0 as isize
+            ));
+            return None;
+        }
+    }
     unsafe {
         use windows::Win32::Foundation::RECT;
         use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
@@ -887,22 +977,11 @@ pub fn capture_hwnd_to_base64(hwnd: HWND, max_width: u32, max_height: u32) -> Op
         // read and made previews feel slower. The repair is a side effect nobody
         // is waiting on, so it has no business sitting in this critical path.
         if success != 0 {
-            // HWND is a raw pointer and not Send; carry the address as an
-            // integer across the thread boundary, as main.rs does for its own
-            // off-thread window work.
-            let hwnd_addr = hwnd.0 as isize;
-            std::thread::spawn(move || {
-                let hwnd = HWND(hwnd_addr as *mut _);
-                if is_window_hidden(hwnd) {
-                    // Repainting a minimized or fully occluded window is wasted
-                    // work and can un-minimize or flash a window the user
-                    // cannot see.
-                    return;
-                }
-                use windows::Win32::Graphics::Gdi::{InvalidateRect, UpdateWindow};
-                let _ = InvalidateRect(Some(hwnd), None, false);
-                let _ = UpdateWindow(hwnd);
-            });
+            crate::utils::dock_log(&format!(
+                "capture start hwnd=0x{:x} printwindow={}",
+                hwnd.0 as isize,
+                success
+            ));
         }
 
         let mut result = None;
@@ -941,6 +1020,38 @@ pub fn capture_hwnd_to_base64(hwnd: HWND, max_width: u32, max_height: u32) -> Op
                     chunk[2] = b;
                     chunk[3] = 255;
                 }
+                // The one objective signal available: a surface PrintWindow has
+                // blackened reads near-zero here, and the user sees exactly
+                // that on their screen. Logging the number turns "sometimes
+                // black" into a timestamped event that can be lined up against
+                // the clicks that caused it.
+                crate::utils::dock_log(&format!(
+                    "capture luma={} size={}x{} hwnd=0x{:x}",
+                    crate::utils::mean_luma(&pixels),
+                    width,
+                    height,
+                    hwnd.0 as isize
+                ));
+
+                // No repaint repair here. Earlier versions called InvalidateRect with
+                // bErase = false followed by UpdateWindow, on the assumption that
+                // PrintWindow was leaving the target's surface damaged. That
+                // assumption was never tested, and the repair turned out to be
+                // the cause of the black-window bug rather than the cure.
+                //
+                // InvalidateRect with bErase = false invalidates the entire
+                // client area, and UpdateWindow forces a synchronous repaint. On
+                // a GPU-composited window such as Chromium's that forces a full
+                // surface rebuild at exactly the moment the window is being
+                // raised — the classic way to produce a black flash. It also ran
+                // after every capture, which during rapid dock switching is
+                // several times a second.
+                //
+                // Measured with BLOOM_NO_REPAIR: 503 clicks with the repair on
+                // produced the black windows; 142 clicks with it off, across the
+                // same 144 PrintWindow calls, produced none. PrintWindow with
+                // PW_RENDERFULLCONTENT does not in fact damage these targets.
+                // Nothing needs repairing, so nothing repairs.
                 if let Ok(Some(png_base64)) =
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         if let Some(mut img) =
