@@ -40,11 +40,21 @@ fn main() {
             CreateEventW, CreateMutexW, OpenEventW, SetEvent, SYNCHRONIZATION_ACCESS_RIGHTS,
         };
 
-        let mutex_name: Vec<u16> = "BloomSingleInstance"
+        // A dev build must not be blocked by an installed release of Bloom (or
+        // vice versa): both resolve the same app_config_dir, so they share
+        // settings.json and updater.json anyway, but the single-instance mutex
+        // would make one of them exit immediately. Release builds keep the
+        // shipped name so users never see two installs fighting over one taskbar.
+        let (mutex_name, event_name): (&str, &str) = if cfg!(debug_assertions) {
+            ("BloomDevSingleInstance", "BloomDevOpenSettings")
+        } else {
+            ("BloomSingleInstance", "BloomOpenSettings")
+        };
+        let mutex_name: Vec<u16> = mutex_name
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();
-        let event_name: Vec<u16> = "BloomOpenSettings"
+        let event_name: Vec<u16> = event_name
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();
