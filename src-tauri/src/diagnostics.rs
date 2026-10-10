@@ -16,7 +16,7 @@ use windows::core::PCWSTR;
 use windows::Win32::{
     Foundation::{HWND, LPARAM},
     System::Registry::{
-        RegOpenKeyExW, RegQueryValueExW, RegCloseKey, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
+        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
         REG_DWORD, REG_SZ, REG_VALUE_TYPE,
     },
     UI::WindowsAndMessaging::{EnumWindows, GetClassNameA},
@@ -240,9 +240,7 @@ unsafe extern "system" fn collect_shell_window(hwnd: HWND, param: LPARAM) -> win
 
 fn shell_info() -> ShellInfo {
     unsafe {
-        use windows::Win32::UI::WindowsAndMessaging::{
-            FindWindowA, IsWindowVisible,
-        };
+        use windows::Win32::UI::WindowsAndMessaging::{FindWindowA, IsWindowVisible};
 
         let primary = FindWindowA(
             windows::core::PCSTR(c"Shell_TrayWnd".as_ptr() as *const u8),
@@ -351,10 +349,7 @@ pub fn collect(app: &tauri::AppHandle) -> Diagnostics {
         },
         settings: REPORTED_SETTINGS
             .iter()
-            .filter_map(|k| {
-                crate::utils::get_setting_str(app, k)
-                    .map(|v| ((*k).to_owned(), v))
-            })
+            .filter_map(|k| crate::utils::get_setting_str(app, k).map(|v| ((*k).to_owned(), v)))
             .collect(),
         notes: DIAGNOSTIC_NOTES.to_vec(),
     }
@@ -369,14 +364,11 @@ pub fn get_diagnostics(app: tauri::AppHandle) -> Diagnostics {
 mod tests {
     use super::*;
 
-    /// These run on any Windows machine, so they catch the parts most likely to
-    /// break: registry value decoding and the EnumWindows class filter. Neither
-    /// needs an AppHandle, which is why they are testable at all.
     /// ProductName has not been updated by Microsoft since Windows 8: on this
-/// machine it reports "Windows 10 Home Single Language" while CurrentBuild is
-/// 26300, a Windows 11 build. A report field that misdirects triage is worse
-/// than an absent one, so this pins its removal.
-#[test]
+    /// machine it reports "Windows 10 Home Single Language" while CurrentBuild
+    /// is 26300, a Windows 11 build. A report field that misdirects triage is
+    /// worse than an absent one, so this pins its removal.
+    #[test]
     fn product_name_is_not_reported() {
         let text = serde_json::to_string(&os_info()).unwrap();
         assert!(
@@ -385,6 +377,10 @@ mod tests {
         );
     }
 
+    /// These all run on any Windows machine, so they catch the parts most
+    /// likely to break: registry value decoding and the EnumWindows class
+    /// filter. Neither needs an AppHandle, which is why they are testable at
+    /// all — and why they run on a CI runner with no desktop attached.
     #[test]
     fn notes_explain_every_deliberate_omission() {
         let joined = DIAGNOSTIC_NOTES.join(" ");

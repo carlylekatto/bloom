@@ -1002,10 +1002,10 @@ mod tests {
             let lower = key.to_lowercase();
             // Matched as whole words or trailing segments. Substring matching
             // trips over unrelated keys like bloom-theme-opacITy containing "lat".
-            for forbidden in ["city", "lat", "lon", "path", "icon", "app", "weather", "cached"] {
-                let hit = lower
-                    .split('_')
-                    .any(|segment| segment == forbidden)
+            for forbidden in [
+                "city", "lat", "lon", "path", "icon", "app", "weather", "cached",
+            ] {
+                let hit = lower.split('_').any(|segment| segment == forbidden)
                     || lower.ends_with(&format!("-{forbidden}"))
                     || lower.ends_with(&format!("_{forbidden}"));
                 assert!(!hit, "{key} looks like it could carry user-supplied data");
