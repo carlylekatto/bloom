@@ -47,3 +47,10 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --all-targets
         working-directory: src-tauri
+
+      - name: Test Rust
+        run: cargo test --locked
+        working-directory: src-tauri
+
+      - name: Test frontend
+        run: bun test scripts/

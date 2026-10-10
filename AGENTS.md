@@ -10,7 +10,8 @@ Run from the repo root unless noted. Bun 1.4.0, Rust stable.
 - `bun run tauri dev` — full dev loop. Vite is on strict port 1420; do not start `bun run dev` separately
 - `bun run build` — `tsc && vite build`; this is the frontend typecheck. `strict` + `noUnusedLocals`/`noUnusedParameters` fail the build. There is no root lint or frontend test script
 - `cargo check --locked` and `cargo clippy --locked --all-targets` in `src-tauri` — CI's Rust gates
-- `cargo test --locked` in `src-tauri` — pure-function unit tests. Runs fast on Windows but CI does **not** run it, so run it yourself
+- `cargo test --locked` in `src-tauri` — pure-function unit tests. Fast on Windows; CI runs it alongside `check` and `clippy`
+- `bun test scripts/` — frontend test (`scripts/dockApps.test.ts`), also in CI. There is still no general frontend test runner or lint script
 - `bun run bump <x.y.z>` — bumps `package.json`, `tauri.conf.json`, `Cargo.toml`, `Cargo.lock` together
 - `bun run release <x.y.z>` — bump + commit + tag + push, must be on `main`. The release workflow fails unless all four version files match the tag. Before/after releasing, follow `RELEASE_CHECKLIST.md` (updater manifest verification, N‑1 install smoke test)
 - `website/` is a separate static site: use `npm install` / `npm run dev` there. Root scripts and CI do not build it
