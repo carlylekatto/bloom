@@ -1237,6 +1237,57 @@ img {
 	height: 12px;
 }
 
+/* Opens the per-app list under the notch's volume row. */
+.volume-mixer-toggle {
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	padding: 0;
+	border: none;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--bloom-text, white);
+	opacity: 0.55;
+	cursor: pointer;
+	transition: opacity 0.16s ease, background 0.16s ease;
+}
+
+.volume-mixer-toggle:hover {
+	opacity: 1;
+	background: rgba(255, 255, 255, 0.08);
+}
+
+.volume-mixer-toggle.open {
+	opacity: 1;
+	background: rgba(255, 255, 255, 0.12);
+}
+
+/* The mixer docks under the notch's volume row. The notch panel grows with it
+   and App.tsx reports that growth to `update_notch_rect`, so the widened notch
+   stays interactive for exactly as long as the list is open.
+
+   Height is animated inline (see App.tsx) rather than set here, so the list's
+   own growth stays in step with the panel's height spring. A fixed 112px made
+   the container report 120px of free space for the frames in between, and
+   .command-center-content-minimal's `justify-content: space-between` handed
+   that space to the middle row — which is what made the Focus / energy saver /
+   system tray row slide before the mixer finished opening. */
+.volume-mixer-dock {
+	display: flex;
+	justify-content: center;
+	overflow: hidden;
+}
+
+/* The shared list pads for the overlay's vertical bar; the notch row has no
+   such alignment to hit, so trim it. */
+.volume-mixer-dock .volume-mixer-list {
+	padding: 2px 2px 0;
+	grid-auto-rows: minmax(48px, 1fr);
+}
+
 .slider-track-premium {
 	position: relative;
 	flex: 1;
