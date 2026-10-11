@@ -204,7 +204,9 @@ body {
 	gap: 12px;
 	padding: 8px 8px;
 	border-radius: 18px 18px 0 0;
-	background: var(--bloom-bg, rgba(0, 0, 0, 0.8));
+	/* Painted by the .edge-surface child (see edge-surface.css). */
+	--surface-bg: var(--bloom-bg, rgba(0, 0, 0, 0.8));
+	isolation: isolate;
 	border: none;
 	color: var(--bloom-text, white);
 	position: relative;
@@ -243,53 +245,6 @@ body {
 	border-radius: 1px;
 	background: color-mix(in srgb, var(--bloom-text, white) 24%, transparent);
 	pointer-events: none;
-}
-
-.dock::before,
-.dock::after {
-	content: "";
-	position: absolute;
-	bottom: 0;
-	width: 13px;
-	height: 13px;
-	pointer-events: none;
-	opacity: 0;
-	transition: opacity 0.3s ease;
-}
-
-.dock.dock-expanded::before,
-.dock.dock-expanded::after {
-	opacity: 1;
-}
-
-.dock::before {
-	left: -13px;
-	-webkit-mask-image: radial-gradient(circle at 0% 0%, transparent 12.5px, black 13px);
-	mask-image: radial-gradient(circle at 0% 0%, transparent 12.5px, black 13px);
-	background:
-		radial-gradient(
-			circle at 0 0,
-			transparent 12px,
-			var(--bloom-border, rgba(255, 255, 255, 0.1)) 12.7px,
-			var(--bloom-border, rgba(255, 255, 255, 0.1)) 13.3px,
-			transparent 14px
-		),
-		var(--bloom-bg, rgba(0, 0, 0, 0.8));
-}
-
-.dock::after {
-	right: -13px;
-	-webkit-mask-image: radial-gradient(circle at 100% 0%, transparent 12.5px, black 13px);
-	mask-image: radial-gradient(circle at 100% 0%, transparent 12.5px, black 13px);
-	background:
-		radial-gradient(
-			circle at 13px 0,
-			transparent 12px,
-			var(--bloom-border, rgba(255, 255, 255, 0.1)) 12.7px,
-			var(--bloom-border, rgba(255, 255, 255, 0.1)) 13.3px,
-			transparent 14px
-		),
-		var(--bloom-bg, rgba(0, 0, 0, 0.8));
 }
 
 .dock-icon-wrapper {

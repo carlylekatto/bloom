@@ -134,7 +134,7 @@ function VolumeNotch({
 			}
 			transition={{ type: "spring", stiffness: 450, damping: 25, mass: 0.7 }}
 		>
-			<div className="volume-notch-flares" />
+			<div className="volume-notch-surface" />
 			<motion.div
 				ref={shellRef}
 				className="volume-notch"

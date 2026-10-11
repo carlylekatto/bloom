@@ -26,13 +26,23 @@ img {
 	/* No pointer-events: none here — the pill itself needs to receive mouse */
 }
 
+/* Registered so hover and theme changes fade the notch colour: it drives the
+   edge surface's mask, and a plain custom property would snap. */
+@property --notch-bg {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: rgba(0, 0, 0, 0.8);
+}
+
 .bloom {
 	display: flex;
 	align-items: center;
 	justify-content: flex-start;
 	position: relative;
 	--notch-bg: var(--bloom-bg, rgba(0, 0, 0, 0.8));
-	background: var(--notch-bg);
+	/* Painted by the .edge-surface child (see edge-surface.css). */
+	--surface-bg: var(--notch-bg);
+	isolation: isolate;
 	border-radius: 0 0 18px 18px;
 	border: none;
 	color: var(--bloom-text, white);
@@ -53,7 +63,7 @@ img {
 		"Segoe UI",
 		sans-serif;
 
-	transition: background 0.3s ease;
+	transition: --notch-bg 0.3s ease;
 }
 
 .bloom.expanded {
@@ -164,45 +174,6 @@ img {
 	opacity: 0.6;
 }
 
-/* Concave top corners ("bridge" to screen edge) */
-.bloom.is-impacted::before,
-.bloom.is-impacted::after {
-	content: "";
-	position: absolute;
-	top: 0;
-	width: 13px;
-	height: 13px;
-	background-color: var(--notch-bg);
-	pointer-events: none;
-	transition: background-color 0.3s ease;
-}
-
-.bloom.is-impacted::before {
-	left: -13px;
-	-webkit-mask-image: radial-gradient(circle at 0% 100%, transparent 12.5px, black 13px);
-	mask-image: radial-gradient(circle at 0% 100%, transparent 12.5px, black 13px);
-	background-image: radial-gradient(
-		circle at 0 13px,
-		transparent 12px,
-		rgba(255, 255, 255, 0.1) 12.7px,
-		rgba(255, 255, 255, 0.1) 13.3px,
-		transparent 14px
-	);
-}
-
-.bloom.is-impacted::after {
-	right: -13px;
-	-webkit-mask-image: radial-gradient(circle at 100% 100%, transparent 12.5px, black 13px);
-	mask-image: radial-gradient(circle at 100% 100%, transparent 12.5px, black 13px);
-	background-image: radial-gradient(
-		circle at 13px 13px,
-		transparent 12px,
-		rgba(255, 255, 255, 0.1) 12.7px,
-		rgba(255, 255, 255, 0.1) 13.3px,
-		transparent 14px
-	);
-}
-
 .time-center {
 	position: relative;
 }
@@ -211,6 +182,48 @@ img {
 .bloom.drag-hover {
 	outline: 2px dashed rgba(255, 255, 255, 0.75);
 	outline-offset: 5px;
+}
+
+/* Live activities shown as round bubbles beside the collapsed pill:
+   music on the right while a timer holds the pill, the shelf on the left. */
+.activity-bubble {
+	position: absolute;
+	/* Centred on the 36px collapsed pill. */
+	top: 3px;
+	min-width: 30px;
+	height: 30px;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	border: none;
+	border-radius: 15px;
+	/* --notch-bg only exists inside the pill (.bloom), so use the theme
+	   colour it is built from to match the collapsed pill in every theme. */
+	background: var(--bloom-bg, rgba(0, 0, 0, 0.8));
+	color: var(--bloom-text, white);
+	cursor: pointer;
+	overflow: hidden;
+}
+
+.activity-bubble img {
+	width: 22px;
+	height: 22px;
+	border-radius: 50%;
+	object-fit: cover;
+}
+
+.activity-bubble.shelf-bubble {
+	padding: 0 9px;
+	font-size: 11px;
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+
+.activity-bubble:focus-visible {
+	outline: 2px solid var(--bloom-text, white);
+	outline-offset: 2px;
 }
 
 /* Panel arrows beside the time, shown once the open notch is clicked */
@@ -489,7 +502,6 @@ img {
 	transition: opacity 0.4s ease;
 }
 
-.album-art-large ~ .album-art-glow-bg,
 .album-art-glow-wrapper:hover .album-art-glow-bg {
 	inset: -6px;
 	width: calc(100% + 12px);
@@ -498,21 +510,9 @@ img {
 	opacity: 0.7;
 }
 
-/* Expanded album art on hover */
-.album-art.album-art-large {
-	width: 34px;
-	height: 34px;
-	border-radius: 8px;
-}
-
 .album-art.paused {
 	width: 20px;
 	height: 20px;
-}
-
-.album-art.album-art-large.paused {
-	width: 28px;
-	height: 28px;
 }
 
 .album-art img {
@@ -566,30 +566,6 @@ img {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-}
-
-.album-art-overlay {
-	position: absolute;
-	top: 0;
-	left: 0;
-	width: 100%;
-	height: 100%;
-	background: rgba(0, 0, 0, 0.4);
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	opacity: 0;
-	transition: opacity 0.2s ease;
-	pointer-events: none;
-}
-
-.album-art:hover .album-art-overlay {
-	opacity: 1;
-}
-
-.control-icon-small {
-	color: white;
-	filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.5));
 }
 
 .album-art:hover {

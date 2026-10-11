@@ -3,6 +3,7 @@ import { motion, AnimatePresence, Reorder } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./Dock.css";
+import "./edge-surface.css";
 import { initTheme } from "./theme";
 import { useSettingsSync } from "./hooks/useSettingsSync";
 import { reloadIfMirrorWasStale } from "./hooks/settingsMirror";
@@ -1144,6 +1145,7 @@ const Dock = memo(function Dock() {
 					style={{ originX: 0.5, originY: 1, minWidth: 34 }}
 					onContextMenu={(e) => handleContextMenu(e, null)}
 				>
+					<div className={`edge-surface edge-surface--bottom ${isExpanded && !isHidden ? "show-flares" : ""}`} />
 					<AnimatePresence>
 						{isExpanded && (
 							<motion.div
