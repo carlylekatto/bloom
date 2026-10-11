@@ -2495,7 +2495,7 @@ function App() {
 		// Shelf expands on mode alone (no hover needed: there is no cursor
 		// hover during an OS drag) and is sized to exactly one row of tiles.
 		if (bloomMode === "shelf") return shelfItems.length > 0 ? 176 : 130;
-// The per-app mixer is docked below the slider rows and the panel is a
+		// The per-app mixer is docked below the slider rows and the panel is a
 		// fixed-height column, so the window has to grow with it or the list
 		// overflows. 120 covers the 112px dock plus the 8px flex gap above it.
 		//
@@ -3463,77 +3463,80 @@ function App() {
 													<span className="cc-classic-percentage">{currentBrightness}%</span>
 													{/* Per-display breakdown, collapsed by default. Only offered when the backend actually found more than one DDC/CI display. */}
 													{brightnessState.perDisplay && (
-													<button
-													className={`cc-monitor-toggle${showMonitorBreakdown ? " open" : ""}`}
-													onClick={(e) => {
-													e.stopPropagation();
-													setShowMonitorBreakdown((open) => !open);
-													}}
-													onPointerDown={(e) => e.stopPropagation()}
-													title={
-													showMonitorBreakdown
-													? "Collapse display breakdown"
-													: "Expand per-display brightness"
-													}
-													aria-label={
-													showMonitorBreakdown
-													? "Collapse display breakdown"
-													: "Expand per-display brightness"
-													}
-													aria-expanded={showMonitorBreakdown}
-													>
-													<MonitorIcon />
-													</button>
+														<button
+															className={`cc-monitor-toggle${showMonitorBreakdown ? " open" : ""}`}
+															onClick={(e) => {
+																e.stopPropagation();
+																setShowMonitorBreakdown((open) => !open);
+															}}
+															onPointerDown={(e) => e.stopPropagation()}
+															title={
+																showMonitorBreakdown
+																	? "Collapse display breakdown"
+																	: "Expand per-display brightness"
+															}
+															aria-label={
+																showMonitorBreakdown
+																	? "Collapse display breakdown"
+																	: "Expand per-display brightness"
+															}
+															aria-expanded={showMonitorBreakdown}
+														>
+															<MonitorIcon />
+														</button>
 													)}
-													
-													{/* One slider per display. Like the mixer dock, this renders inside the container App.tsx reports to `update_notch_rect`, so the existing ResizeObserver covers the height change too. */}
-													<AnimatePresence initial={false}>
-													{showMonitorBreakdown && brightnessState.monitors.length > 1 && (
-													<motion.div
-													className="cc-monitor-list"
-													initial={{ opacity: 0, height: 0 }}
-													animate={{ opacity: 1, height: "auto" }}
-													exit={{ opacity: 0, height: 0 }}
-													transition={{
-													height: { type: "spring", stiffness: 450, damping: 29 },
-													opacity: { duration: 0.18, ease: "easeOut" }
-													}}
-													style={{ overflow: "hidden" }}
-													>
-													{brightnessState.monitors.map((monitor) => (
-													<div className="cc-classic-slider-row" key={monitor.index}>
-													<div className="cc-classic-slider-label" title={monitor.name}>
-													<MonitorIcon />
-													<span className="cc-monitor-name">{monitor.name}</span>
-													</div>
-													<div className="cc-classic-slider-track">
-													<input
-													type="range"
-													min="0"
-													max="100"
-													step="1"
-													value={monitor.brightness}
-													onChange={(e) =>
-													handleMonitorBrightnessChange(monitor.index, parseInt(e.target.value))
-													}
-													onPointerDown={(e) => e.stopPropagation()}
-													onClick={(e) => e.stopPropagation()}
-													className="cc-classic-input"
-													/>
-													<div
-													className="cc-classic-fill"
-													style={{ width: `${monitor.brightness}%` }}
-													/>
-													</div>
-													<span className="cc-classic-percentage">
-													{monitor.brightness}%
-													</span>
-													</div>
-													))}
-													</motion.div>
-													)}
-													</AnimatePresence>
 												</div>
+
+												{/* One slider per display. Like the mixer dock, this renders inside the container App.tsx reports to `update_notch_rect`, so the existing ResizeObserver covers the height change too. */}
+												<AnimatePresence initial={false}>
+													{showMonitorBreakdown && brightnessState.monitors.length > 1 && (
+														<motion.div
+															className="cc-monitor-list"
+															initial={{ opacity: 0, height: 0 }}
+															animate={{ opacity: 1, height: "auto" }}
+															exit={{ opacity: 0, height: 0 }}
+															transition={{
+																height: { type: "spring", stiffness: 450, damping: 29 },
+																opacity: { duration: 0.18, ease: "easeOut" }
+															}}
+															style={{ overflow: "hidden" }}
+														>
+															{brightnessState.monitors.map((monitor) => (
+																<div className="cc-classic-slider-row" key={monitor.index}>
+																	<div className="cc-classic-slider-label" title={monitor.name}>
+																		<MonitorIcon />
+																		<span className="cc-monitor-name">{monitor.name}</span>
+																	</div>
+																	<div className="cc-classic-slider-track">
+																		<input
+																			type="range"
+																			min="0"
+																			max="100"
+																			step="1"
+																			value={monitor.brightness}
+																			onChange={(e) =>
+																				handleMonitorBrightnessChange(
+																					monitor.index,
+																					parseInt(e.target.value)
+																				)
+																			}
+																			onPointerDown={(e) => e.stopPropagation()}
+																			onClick={(e) => e.stopPropagation()}
+																			className="cc-classic-input"
+																		/>
+																		<div
+																			className="cc-classic-fill"
+																			style={{ width: `${monitor.brightness}%` }}
+																		/>
+																	</div>
+																	<span className="cc-classic-percentage">
+																		{monitor.brightness}%
+																	</span>
+																</div>
+															))}
+														</motion.div>
+													)}
+												</AnimatePresence>
 											</div>
 										</motion.div>
 									)}

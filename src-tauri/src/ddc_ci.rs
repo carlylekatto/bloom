@@ -82,6 +82,93 @@ pub struct MonitorBrightness {
 /// Physical monitors discovered on the first call, reused afterwards.
 static MONITORS: Mutex<Option<Vec<Monitor>>> = Mutex::new(None);
 
+// ---------------------------------------------------------------------------
+// Dev-only multi-display stand-in.
+//
+// A laptop panel rarely speaks DDC/CI, so the per-display UI cannot be opened at
+// all on the machine it was written on — and "it compiles" is exactly how the
+// height arithmetic and the fixed-width label box go unnoticed. Setting
+// `BLOOM_FAKE_DDC=<n>` reports `n` synthetic displays so the whole path can be
+// driven on one screen: the frontend, the commands, the poll loop and the CSS
+// are all real, and only the I2C bus is stood in for.
+//
+// Everything here is behind `cfg(debug_assertions)`, as are the call sites, so a
+// release build does not merely skip the check — the branch is not compiled at
+// all and there is no environment variable that can turn it on.
+// ---------------------------------------------------------------------------
+
+/// Synthetic displays and their current values, so a drag is observable on the
+/// next read the same way a real panel's would be.
+#[cfg(debug_assertions)]
+static FAKE_DISPLAYS: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
+
+/// How many displays `BLOOM_FAKE_DDC` asks for, or `None` when it is unset.
+///
+/// Bounded to 1..=8 so a typo cannot make the panel absurdly tall: the command
+/// centre grows 26px per row.
+#[cfg(debug_assertions)]
+fn fake_count() -> Option<usize> {
+    let count = std::env::var("BLOOM_FAKE_DDC").ok()?.trim().parse::<usize>().ok()?;
+    (1..=8).contains(&count).then_some(count)
+}
+
+/// Names are drawn from what real EDID descriptions actually look like, not from
+/// tidy placeholders: the per-display label box is a fixed 75px, so a long name
+/// is the only thing that exercises the ellipsis.
+#[cfg(debug_assertions)]
+fn fake_name(index: usize) -> String {
+    const NAMES: [&str; 4] = [
+        "Dell U2720Q",
+        "Generic PnP Monitor",
+        "ASUS VG249Q",
+        "LG ULTRAWIDE",
+    ];
+    NAMES[index % NAMES.len()].to_string()
+}
+
+/// The state a faked bus would report, seeding the store on first use so the
+/// values survive across polls and drags.
+#[cfg(debug_assertions)]
+fn fake_state() -> Option<BrightnessState> {
+    let count = fake_count()?;
+    let mut displays = FAKE_DISPLAYS.lock().unwrap();
+    if displays.len() != count {
+        displays.clear();
+        for index in 0..count {
+            displays.push((fake_name(index), 40 + index as u32 * 15));
+        }
+    }
+    let monitors: Vec<MonitorBrightness> = displays
+        .iter()
+        .enumerate()
+        .map(|(index, (name, brightness))| MonitorBrightness {
+            index,
+            name: name.clone(),
+            brightness: *brightness,
+        })
+        .collect();
+    let per_display = monitors.len() > 1;
+    Some(BrightnessState {
+        master: monitors.first().map(|monitor| monitor.brightness),
+        monitors,
+        per_display,
+    })
+}
+
+/// Records a write against a faked display. `Some(false)` for an index that does
+/// not exist, mirroring a real handle that has stopped answering.
+#[cfg(debug_assertions)]
+fn fake_set(index: usize, percent: u32) -> Option<bool> {
+    fake_count()?;
+    let mut displays = FAKE_DISPLAYS.lock().unwrap();
+    let Some(slot) = displays.get_mut(index) else {
+        return Some(false);
+    };
+    slot.1 = percent.min(100);
+    Some(true)
+}
+
+
 /// Rebuilds the `HANDLE` the Win32 calls take.
 fn as_handle(raw: usize) -> HANDLE {
     HANDLE(raw as *mut std::ffi::c_void)
@@ -400,6 +487,10 @@ fn write(monitor: &Monitor, percent: u32) -> bool {
 /// one row per display, and a list that flickers in size makes that decision
 /// flicker too.
 pub fn list() -> Vec<MonitorBrightness> {
+    #[cfg(debug_assertions)]
+    if let Some(state) = fake_state() {
+        return state.monitors;
+    }
     let monitors = cached();
     let mut listed = Vec::with_capacity(monitors.len());
     for (index, monitor) in monitors.iter().enumerate() {
@@ -440,6 +531,10 @@ fn remember_one(index: usize, brightness: u32) {
 /// [`state`], rescanning the bus first so a display that was asleep when the
 /// cache was built still shows up.
 pub fn state_refreshed() -> BrightnessState {
+    #[cfg(debug_assertions)]
+    if let Some(state) = fake_state() {
+        return state;
+    }
     let previous = MONITORS.lock().unwrap().take();
     let fresh = discover();
     // A scan that comes back with fewer displays is almost always one that is
@@ -515,6 +610,10 @@ pub fn state() -> BrightnessState {
 
 /// Writes brightness to a single monitor, addressed by its index in [`list`].
 pub fn set_one(index: usize, percent: u32) -> bool {
+    #[cfg(debug_assertions)]
+    if let Some(result) = fake_set(index, percent) {
+        return result;
+    }
     let monitors = cached();
     let Some(monitor) = monitors.get(index) else {
         return false;
