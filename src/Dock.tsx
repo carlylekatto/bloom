@@ -1775,6 +1775,41 @@ const Dock = memo(function Dock() {
 									</div>
 								</>
 							)}
+							{/* Windows 11 hides "End task" behind Settings → System → For
+							    developers, and Windows 10 dropped it entirely. Bloom just
+							    exposes it, and it matters here more than in Windows: "Close"
+							    above is deliberately absent for tray apps, so before this they
+							    had no way to stop from the dock at all.
+
+							    No confirmation prompt, matching Windows. This is the escape
+							    hatch for an app that will not answer WM_CLOSE, and the apps
+							    it rescues are exactly the ones where a modal would be in the
+							    way. */}
+							{contextMenu.app.is_running &&
+								contextMenu.app.path !== "start" &&
+								!!contextMenu.app.executable && (
+									<>
+										{contextMenu.app.is_background && <div className="menu-divider" />}
+										<div
+											className="menu-item quit"
+											onClick={async () => {
+												const app = contextMenu.app!;
+												const exe = app.executable!;
+												closeMenu();
+												try {
+													await invoke("end_task", { exeName: exe });
+												} catch {
+													// The app can exit between the click and the
+													// snapshot. Nothing went wrong worth surfacing.
+												}
+											}}
+										>
+											{(contextMenu.app.all_hwnds?.length ?? 0) > 1
+												? "End all tasks"
+												: "End task"}
+										</div>
+									</>
+								)}
 						</>
 					) : (
 						<>

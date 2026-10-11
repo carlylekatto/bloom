@@ -2924,6 +2924,72 @@ pub async fn close_window(hwnd: isize) {
     .unwrap_or_default();
 }
 
+/// Terminate every process running under `exe_name`, reproducing the Windows 11
+/// taskbar's "End task".
+///
+/// Windows kills by image name rather than by the process owning the window you
+/// clicked, so three things follow that `close_window` cannot do: a browser with
+/// several windows goes down entirely instead of one of them, helper processes
+/// with no window of their own are cleaned up too, and an app that kept running
+/// in the tray after closing its window actually stops. That gap is the whole
+/// reason the feature exists — Bloom hides "Close" for tray apps, which left
+/// them with no way to be stopped from the dock at all.
+///
+/// Deliberate, matching Windows: no confirmation. "End task" is an escape hatch
+/// for an app that will not respond, and a prompt would defeat that; the tray
+/// apps it rescues are the ones that have no other route.
+///
+/// Returns how many processes were terminated, which can be zero if the app had
+/// already exited between the click and the snapshot.
+#[tauri::command]
+pub async fn end_task(exe_name: String) -> Result<u32, String> {
+    let target = exe_name.trim().to_lowercase();
+    if target.is_empty() {
+        return Err("end_task needs an executable name".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || unsafe {
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+            TH32CS_SNAPPROCESS,
+        };
+        use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+
+        let own_pid = std::process::id();
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+            .map_err(|_| "could not enumerate processes".to_string())?;
+
+        let mut terminated = 0u32;
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut more = Process32FirstW(snapshot, &mut entry).is_ok();
+        while more {
+            let pid = entry.th32ProcessID;
+            // Never Bloom itself: the dock runs inside this process and killing
+            // it would take the menu down mid-click.
+            if pid != 0 && pid != own_pid {
+                let matches = process_image_path(pid)
+                    .and_then(|p| p.rsplit('\\').next().map(|f| f.to_lowercase()))
+                    .is_some_and(|name| name == target);
+                if matches {
+                    if let Ok(handle) = OpenProcess(PROCESS_TERMINATE, false, pid) {
+                        if TerminateProcess(handle, 1).is_ok() {
+                            terminated += 1;
+                        }
+                        let _ = CloseHandle(handle);
+                    }
+                }
+            }
+            more = Process32NextW(snapshot, &mut entry).is_ok();
+        }
+        let _ = CloseHandle(snapshot);
+        Ok(terminated)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 fn re_register_appbars(app: &AppHandle, settings: &HashMap<String, serde_json::Value>) {
     // Reconcile the notch from the live mode: a scale change alters the
     // reserved strip height, and peek/smart must never hold a reservation.
