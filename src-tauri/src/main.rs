@@ -157,6 +157,7 @@ fn main() {
             focus_window,
             focus_app_windows,
             close_window,
+            end_task,
             quit_bloom,
             restart_bloom,
             get_volume,
