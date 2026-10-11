@@ -1281,12 +1281,9 @@ img {
 	overflow: hidden;
 }
 
-/* The shared list pads for the overlay's vertical bar; the notch row has no
-   such alignment to hit, so trim it. */
-.volume-mixer-dock .volume-mixer-list {
-	padding: 2px 2px 0;
-	grid-auto-rows: minmax(48px, 1fr);
-}
+/* Padding, row height and scrolling for the notch live in
+   components/AudioMixer.css under .volume-mixer-list-scroll, so the two
+   surfaces cannot drift apart. */
 
 .slider-track-premium {
 	position: relative;

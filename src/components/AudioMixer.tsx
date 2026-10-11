@@ -151,9 +151,23 @@ function MixerTile({
  */
 export function AudioMixer({
 	active,
+	layout = "wrap",
 	onWidthChange
 }: {
 	active: boolean;
+	/**
+	 * How the list arranges tiles once there are more apps than fit.
+	 *
+	 * `wrap` keeps at most four columns and stacks the rest into further rows,
+	 * which suits the overlay: its panel is sized to the column count and as tall
+	 * as the screen edge allows.
+	 *
+	 * `scroll` keeps everything on one row and scrolls sideways. The notch needs
+	 * this because its dock is a fixed 112px: wrapping put a fifth app onto a
+	 * second row that overlapped the first, since the two rows together exceeded
+	 * the height. Cramped and wrong, not merely tight.
+	 */
+	layout?: "wrap" | "scroll";
 	/**
 	 * Reports the panel width so a host that sizes its own shell around the
 	 * mixer (the overlay notch) can animate to fit. Surfaces that grow their
@@ -278,11 +292,29 @@ export function AudioMixer({
 	return (
 		<div
 			className="volume-mixer-host"
-			style={{ width: mixerPanelWidth }}
+			style={layout === "wrap" ? { width: mixerPanelWidth } : { width: "100%" }}
 			onClick={(e) => e.stopPropagation()}
 			onPointerDown={(e) => e.stopPropagation()}
 		>
-			<div className="volume-mixer-list" style={{ gridTemplateColumns: `repeat(${mixerColumns}, 1fr)` }}>
+			<div
+				className={`volume-mixer-list${layout === "scroll" ? " volume-mixer-list-scroll" : ""}`}
+				style={layout === "wrap" ? { gridTemplateColumns: `repeat(${mixerColumns}, 1fr)` } : undefined}
+				onWheel={
+					layout === "scroll"
+						? (e) => {
+								// The tiles are dragged vertically, so the wheel is free here.
+								// Without this a mouse with no horizontal wheel — which is most of
+								// them — could only reach a fifth app by hunting for a 4px scrollbar.
+								const el = e.currentTarget;
+								if (el.scrollWidth <= el.clientWidth) return;
+								const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+								if (delta === 0) return;
+								el.scrollLeft += delta;
+								e.preventDefault();
+							}
+						: undefined
+				}
+			>
 				{sessions.length === 0 ? (
 					<div className="volume-mixer-empty">
 						{!sessionsLoaded ? "Loading..." : sessionsError ? "Couldn't read audio sessions" : "No apps with audio"}

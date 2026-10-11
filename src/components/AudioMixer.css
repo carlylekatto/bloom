@@ -49,6 +49,61 @@
 	justify-content: center;
 }
 
+/* One row, scrolling sideways, capped at five visible apps. Used by the notch,
+   whose dock is too short for a second row — see the `layout` prop on
+   AudioMixer.
+
+   `grid-template-columns: none` is load-bearing. The shared rule declares
+   `repeat(4, 1fr)`, and those four flexible tracks shrink to fit whatever is
+   present, so seven apps compressed into the panel instead of overflowing and
+   leaving anything to scroll. Dropping the declaration makes every column
+   implicit and fixed at `grid-auto-columns`, so the strip outgrows the dock and
+   `overflow-x` finally has something to act on.
+
+   The width cap is what actually fixes the limit at five. Sizing tiles alone
+   does not: the panel gives roughly 318px of usable width, so at 44px a seventh
+   app still fitted and the scrollbar only appeared at eight. Capping the strip
+   itself makes "five visible, the sixth scrolls" hold regardless of how wide
+   the panel is or later becomes. Tiles widen to 56px to fill most of the width
+   the cap allows, which buys a larger drag target and a larger mute button. */
+.volume-mixer-list-scroll {
+	grid-template-columns: none;
+	grid-auto-flow: column;
+	grid-auto-columns: 56px;
+	grid-auto-rows: none;
+	max-width: calc(5 * 56px + 4 * 4px);
+	margin: 0 auto;
+	padding: 2px 2px 6px;
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: thin;
+	scrollbar-color: var(--bloom-border, rgba(255, 255, 255, 0.2)) transparent;
+	/* Vertical drags scroll the tile sliders, so the list must not steal them
+	   as a vertical gesture while still allowing sideways panning. */
+	overscroll-behavior-x: contain;
+}
+
+.volume-mixer-list-scroll::-webkit-scrollbar {
+	height: 4px;
+}
+
+.volume-mixer-list-scroll::-webkit-scrollbar-thumb {
+	background: var(--bloom-border, rgba(255, 255, 255, 0.2));
+	border-radius: 2px;
+}
+
+.volume-mixer-list-scroll::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+/* The shared empty state spans `1 / -1`, which needs explicit columns to mean
+   anything. Without them the message is squeezed into one 44px track, so span
+   a generous number of implicit columns instead. */
+.volume-mixer-list-scroll .volume-mixer-empty {
+	grid-column: 1 / span 99;
+	min-width: 100%;
+}
+
 .volume-mixer-tile {
 	display: flex;
 	flex-direction: column;

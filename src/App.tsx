@@ -3291,7 +3291,7 @@ function App() {
 															onClick={(e) => e.stopPropagation()}
 															onPointerDown={(e) => e.stopPropagation()}
 														>
-															<AudioMixer active={appMixerOpen} />
+															<AudioMixer active={appMixerOpen} layout="scroll" />
 														</motion.div>
 													)}
 												</AnimatePresence>
