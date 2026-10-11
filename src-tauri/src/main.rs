@@ -3,6 +3,7 @@
 mod commands;
 mod diagnostics;
 mod dock_extras;
+mod ddc_ci;
 mod services;
 mod shelf;
 mod state;
@@ -180,6 +181,8 @@ fn main() {
             open_bluetooth_settings,
             open_airplane_mode_settings,
             set_brightness,
+            get_brightness_state,
+            set_monitor_brightness,
             get_battery_saver_state,
             open_battery_saver_settings,
             get_system_accent_color,

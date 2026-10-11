@@ -3411,6 +3411,35 @@ pub fn set_brightness(app: AppHandle, brightness: u32) {
     }
 }
 
+/// Master value plus one entry per display, in a single round of I2C reads.
+///
+/// Pass `refresh` to rescan the bus first: the handle cache is built at
+/// startup, when a display may still have been asleep.
+#[tauri::command]
+pub async fn get_brightness_state(refresh: bool) -> Result<crate::ddc_ci::BrightnessState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if refresh {
+            crate::ddc_ci::state_refreshed()
+        } else {
+            crate::ddc_ci::state()
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Writes brightness to one monitor, addressed by the `index` that
+/// `get_brightness_state` reported. Kept off the async executor because the
+/// write blocks for ~50 ms per monitor.
+#[tauri::command]
+pub async fn set_monitor_brightness(index: usize, brightness: u32) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::ddc_ci::set_one(index, brightness.min(100))
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn get_battery_saver_state() -> Result<bool, String> {
     // Uses Windows Runtime PowerManager — no PowerShell required.

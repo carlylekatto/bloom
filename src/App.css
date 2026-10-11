@@ -1864,6 +1864,76 @@ img {
 	width: 100%;
 }
 
+/* Per-display brightness rows under the all-monitor slider */
+.cc-monitor-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	width: 100%;
+}
+
+/* Keep the per-display tracks lined up with the master row above, which
+   carries a 16px toggle button plus a 10px gap on its trailing edge. */
+.cc-monitor-list .cc-classic-slider-row {
+	padding-right: 26px;
+	box-sizing: border-box;
+}
+
+/* The label box is a fixed 75px, so a long EDID name has to truncate
+   instead of pushing the slider out of the row. */
+.cc-monitor-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Small monitor button that opens the per-display breakdown */
+.cc-monitor-toggle {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--bloom-text-muted, rgba(255, 255, 255, 0.55));
+	cursor: pointer;
+	transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+	flex-shrink: 0;
+}
+
+.cc-monitor-toggle:hover {
+	background: var(--bloom-border, rgba(255, 255, 255, 0.12));
+	color: var(--bloom-text, rgba(255, 255, 255, 0.95));
+}
+
+.cc-monitor-toggle:active {
+	transform: scale(0.92);
+}
+
+.cc-monitor-toggle.open {
+	background: var(--bloom-text, #ffffff);
+	border-color: var(--bloom-text, #ffffff);
+	color: var(--bloom-bg-expanded, #000000);
+	box-shadow: 0 1px 6px var(--bloom-border, rgba(255, 255, 255, 0.18));
+}
+
+.cc-monitor-toggle.open:hover {
+	background: rgba(255, 255, 255, 0.9);
+}
+
+.cc-monitor-toggle svg {
+	width: 11px;
+	height: 11px;
+	transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cc-monitor-toggle.open svg {
+	transform: scale(1.05);
+}
+
 .cc-classic-slider-row {
 	display: flex;
 	align-items: center;

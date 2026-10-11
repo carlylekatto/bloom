@@ -414,6 +414,13 @@ interface ShelfItem {
 	timestamp: number;
 }
 
+/** One DDC/CI-capable display, as reported by `get_brightness_state`. */
+interface MonitorBrightness {
+	index: number;
+	name: string;
+	brightness: number;
+}
+
 type BloomMode = "music" | "calendar" | "command-center" | "announcement" | "status" | "shelf";
 
 // The shelf is a short-lived stash: one row, newest first, oldest evicted.
@@ -576,6 +583,18 @@ function App() {
 	const [bluetoothEnabled, setBluetoothEnabled] = useState(true);
 	const [batterySaverEnabled, setBatterySaverEnabled] = useState(false);
 	const [currentBrightness, setCurrentBrightness] = useState(50);
+	// Per-display brightness, as the backend describes it. `monitors` is empty on
+	// a single-display setup and on panels that do not speak DDC/CI, so
+	// `perDisplay` is what decides whether the breakdown button appears at all.
+	// The master row keeps using `currentBrightness`: it is the same value, but
+	// it is already driven by the `brightness-change` event and by WMI on
+	// laptops, which the DDC/CI read does not cover.
+	const [brightnessState, setBrightnessState] = useState<{
+		master: number | null;
+		monitors: MonitorBrightness[];
+		perDisplay: boolean;
+	}>({ master: null, monitors: [], perDisplay: false });
+	const [showMonitorBreakdown, setShowMonitorBreakdown] = useState(false);
 
 	// System metrics for status widgets
 	const [cpuUsage, setCpuUsage] = useState(0);
@@ -2225,6 +2244,69 @@ function App() {
 		[sendBrightness]
 	);
 
+	// Per-display brightness. Reading a display is an I2C round trip (~40 ms),
+	// so the state is refreshed when the command centre opens and then slowly
+	// while it is visible - a monitor's own hardware buttons raise no event to
+	// catch, so polling is the only way to notice an out-of-band change.
+	const refreshBrightnessState = useCallback((rescan: boolean) => {
+		invoke<{
+			master: number | null;
+			monitors: MonitorBrightness[];
+			perDisplay: boolean;
+		}>("get_brightness_state", { refresh: rescan })
+			.then(setBrightnessState)
+			.catch(() => {});
+	}, []);
+
+	useEffect(() => {
+		// Gated on `isOpen`, not on the mode alone: after #192 the notch keeps its
+		// panel across a close, so `bloomMode === "command-center"` is still true
+		// while the panel is collapsed at 36px. Polling there would keep issuing
+		// ~40 ms I2C reads per display with nothing on screen to reconcile.
+		if (!isOpen || bloomMode !== "command-center") return;
+		// Rescan on open: the backend caches handles from startup, when a
+		// display may still have been asleep.
+		refreshBrightnessState(true);
+		const timer = setInterval(() => refreshBrightnessState(false), 2000);
+		return () => clearInterval(timer);
+	}, [isOpen, bloomMode, refreshBrightnessState]);
+
+	// Each display needs its own throttle. `useTrailingThrottle` keeps a single
+	// pending call, so dragging one display and then another inside 50 ms would
+	// silently drop the first write.
+	const pendingMonitorWrites = useRef(new Map<number, { value: number; timer: number }>());
+	const sendMonitorBrightness = useCallback((index: number, value: number) => {
+		const pending = pendingMonitorWrites.current;
+		const existing = pending.get(index);
+		if (existing) {
+			existing.value = value;
+			return;
+		}
+		invoke("set_monitor_brightness", { index, brightness: value }).catch(() => {});
+		const entry = { value, timer: 0 };
+		entry.timer = window.setTimeout(() => {
+			pending.delete(index);
+			if (entry.value !== value) {
+				invoke("set_monitor_brightness", { index, brightness: entry.value }).catch(() => {});
+			}
+		}, 50);
+		pending.set(index, entry);
+	}, []);
+
+	const handleMonitorBrightnessChange = useCallback(
+		(index: number, value: number) => {
+			// Update locally right away; the 2 s poll reconciles with the panel.
+			setBrightnessState((prev) => ({
+				...prev,
+				monitors: prev.monitors.map((monitor) =>
+					monitor.index === index ? { ...monitor, brightness: value } : monitor
+				)
+			}));
+			sendMonitorBrightness(index, value);
+		},
+		[sendMonitorBrightness]
+	);
+
 	// Open system tray (unhide taskbar and invoke Win+B)
 	const openSystemTray = useCallback(async (e: React.MouseEvent) => {
 		e.stopPropagation();
@@ -2421,7 +2503,17 @@ function App() {
 		// #192, which makes the command centre open on click rather than hover.
 		// `isOpen` is the state that matches the rest of that rework, so the
 		// mixer offset is folded onto it rather than keeping the old variable.
-		if (bloomMode === "command-center") return (isOpen ? 230 : 36) + (appMixerOpen ? 120 : 0);
+		if (bloomMode === "command-center") {
+			// The expanded per-display breakdown adds one row per display: an 18px
+			// row plus an 8px gap, matching the 8px layout rhythm the other rows
+			// use. Both this and the mixer below grow the same fixed-height column,
+			// so the window height has to carry the sum.
+			const monitorRowsPx =
+				showMonitorBreakdown && brightnessState.perDisplay && brightnessState.monitors.length > 1
+					? brightnessState.monitors.length * 26
+					: 0;
+			return (isOpen ? 230 : 36) + (appMixerOpen ? 120 : 0) + monitorRowsPx;
+		}
 		if (bloomMode === "status") return 36;
 		if (isMusicMode && isOpen) {
 			const hasProgressBar = (mediaInfo.duration_ms ?? 0) > 0;
@@ -2448,6 +2540,15 @@ function App() {
 			setCompactVolumeExpanded(false);
 		}
 	}, [isHovered, mediaLayout, bloomMode]);
+
+	// Collapse the per-display breakdown when the notch closes or the mode moves
+	// on. The panel height is derived from this flag, so leaving it open would
+	// make the next open taller than the one the user last dismissed.
+	useEffect(() => {
+		if (!isOpen || bloomMode !== "command-center") {
+			setShowMonitorBreakdown(false);
+		}
+	}, [isOpen, bloomMode]);
 
 	return (
 		<div className="screen" style={{ overflow: "hidden" }}>
@@ -3360,6 +3461,78 @@ function App() {
 														/>
 													</div>
 													<span className="cc-classic-percentage">{currentBrightness}%</span>
+													{/* Per-display breakdown, collapsed by default. Only offered when the backend actually found more than one DDC/CI display. */}
+													{brightnessState.perDisplay && (
+													<button
+													className={`cc-monitor-toggle${showMonitorBreakdown ? " open" : ""}`}
+													onClick={(e) => {
+													e.stopPropagation();
+													setShowMonitorBreakdown((open) => !open);
+													}}
+													onPointerDown={(e) => e.stopPropagation()}
+													title={
+													showMonitorBreakdown
+													? "Collapse display breakdown"
+													: "Expand per-display brightness"
+													}
+													aria-label={
+													showMonitorBreakdown
+													? "Collapse display breakdown"
+													: "Expand per-display brightness"
+													}
+													aria-expanded={showMonitorBreakdown}
+													>
+													<MonitorIcon />
+													</button>
+													)}
+													
+													{/* One slider per display. Like the mixer dock, this renders inside the container App.tsx reports to `update_notch_rect`, so the existing ResizeObserver covers the height change too. */}
+													<AnimatePresence initial={false}>
+													{showMonitorBreakdown && brightnessState.monitors.length > 1 && (
+													<motion.div
+													className="cc-monitor-list"
+													initial={{ opacity: 0, height: 0 }}
+													animate={{ opacity: 1, height: "auto" }}
+													exit={{ opacity: 0, height: 0 }}
+													transition={{
+													height: { type: "spring", stiffness: 450, damping: 29 },
+													opacity: { duration: 0.18, ease: "easeOut" }
+													}}
+													style={{ overflow: "hidden" }}
+													>
+													{brightnessState.monitors.map((monitor) => (
+													<div className="cc-classic-slider-row" key={monitor.index}>
+													<div className="cc-classic-slider-label" title={monitor.name}>
+													<MonitorIcon />
+													<span className="cc-monitor-name">{monitor.name}</span>
+													</div>
+													<div className="cc-classic-slider-track">
+													<input
+													type="range"
+													min="0"
+													max="100"
+													step="1"
+													value={monitor.brightness}
+													onChange={(e) =>
+													handleMonitorBrightnessChange(monitor.index, parseInt(e.target.value))
+													}
+													onPointerDown={(e) => e.stopPropagation()}
+													onClick={(e) => e.stopPropagation()}
+													className="cc-classic-input"
+													/>
+													<div
+													className="cc-classic-fill"
+													style={{ width: `${monitor.brightness}%` }}
+													/>
+													</div>
+													<span className="cc-classic-percentage">
+													{monitor.brightness}%
+													</span>
+													</div>
+													))}
+													</motion.div>
+													)}
+													</AnimatePresence>
 												</div>
 											</div>
 										</motion.div>
@@ -3785,6 +3958,25 @@ function SettingsIcon() {
 		>
 			<circle cx="12" cy="12" r="3" />
 			<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+		</svg>
+	);
+}
+
+function MonitorIcon() {
+	return (
+		<svg
+			width="12"
+			height="12"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="2"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+		>
+			<rect x="2" y="3" width="20" height="14" rx="2" />
+			<line x1="8" y1="21" x2="16" y2="21" />
+			<line x1="12" y1="17" x2="12" y2="21" />
 		</svg>
 	);
 }
