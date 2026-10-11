@@ -15,8 +15,10 @@ import {
 	VolumeLowIcon,
 	VolumeHighIcon,
 	MusicNoteIcon,
-	HeadphonesIcon
+	HeadphonesIcon,
+	MixerIcon
 } from "./icons";
+import { AudioMixer } from "./components/AudioMixer";
 import { CompactMediaPlayer } from "./CompactMediaPlayer";
 import { useWeather } from "./hooks/useWeather";
 import { useSettingsSync } from "./hooks/useSettingsSync";
@@ -538,6 +540,10 @@ function App() {
 	const [albumArtKey, setAlbumArtKey] = useState(0);
 	const [volume, setVolume] = useState(0.5);
 	const [isMuted, setIsMuted] = useState(false);
+	// Per-app volume list, collapsed by default. The notch's volume HUD stands in
+	// for the native flyout that Bloom hides, so without this the only way to
+	// change a single app's volume was to turn the HUD off and use Windows'.
+	const [appMixerOpen, setAppMixerOpen] = useState(false);
 	// Sliders show 0 while muted, matching the overlay HUD.
 	const displayVolume = isMuted ? 0 : volume;
 	// Null until the first successful fetch so the pill can't flash a wrong
@@ -2366,7 +2372,10 @@ function App() {
 		// Shelf expands on mode alone (no hover needed — there is no cursor
 		// hover during an OS drag) and is sized to exactly one row of tiles.
 		if (bloomMode === "shelf") return shelfItems.length > 0 ? 176 : 130;
-		if (bloomMode === "command-center") return isHovered ? 230 : 36;
+		// The per-app mixer is docked below the slider rows and the panel is a
+		// fixed-height column, so the window has to grow with it or the list
+		// overflows. 120 covers the 112px dock plus the 8px flex gap above it.
+		if (bloomMode === "command-center") return (isHovered ? 230 : 36) + (appMixerOpen ? 120 : 0);
 		if (bloomMode === "status") return 36;
 		if (isMusicMode && isHovered) {
 			const hasProgressBar = (mediaInfo.duration_ms ?? 0) > 0;
@@ -3254,7 +3263,38 @@ function App() {
 													<span className="cc-classic-percentage">
 														{Math.round(displayVolume * 100)}%
 													</span>
+													<button
+														className={`volume-mixer-toggle ${appMixerOpen ? "open" : ""}`}
+														onClick={(e) => {
+															e.stopPropagation();
+															setAppMixerOpen((v) => !v);
+														}}
+														onPointerDown={(e) => e.stopPropagation()}
+														title={appMixerOpen ? "Hide per-app volume" : "Per-app volume"}
+														aria-label={appMixerOpen ? "Hide per-app volume" : "Per-app volume"}
+														aria-expanded={appMixerOpen}
+													>
+														<MixerIcon size={13} />
+													</button>
 												</div>
+
+												{/* Per-app volumes. This renders inside the container App.tsx reports
+												    to `update_notch_rect`, so opening it grows the notch's
+												    interactive region through the existing ResizeObserver. */}
+												<AnimatePresence>
+													{appMixerOpen && (
+														<motion.div
+															className="volume-mixer-dock"
+															initial={{ opacity: 0, height: 0 }}
+															animate={{ opacity: 1, height: 112 }}
+															exit={{ opacity: 0, height: 0, transition: { duration: 0.12 } }}
+															onClick={(e) => e.stopPropagation()}
+															onPointerDown={(e) => e.stopPropagation()}
+														>
+															<AudioMixer active={appMixerOpen} />
+														</motion.div>
+													)}
+												</AnimatePresence>
 
 												{/* Brightness Slider */}
 												<div className="cc-classic-slider-row">
