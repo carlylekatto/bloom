@@ -13,7 +13,14 @@ import { removeCustomFolder, type DockExtra } from "./dockExtras";
 // Host processes (Edge/Chrome/Brave/ApplicationFrameHost) run every PWA/UWP
 // window, so their window title must be part of their identity — otherwise two
 // PWAs running under the same browser collapse into a single dock item.
-const HOST_PROCESSES = ["msedge.exe", "chrome.exe", "brave.exe", "applicationframehost.exe"];
+// The one process every UWP app runs inside — Settings, Xbox, the Store, and
+// anything else installed from it. Two consequences: it is a browser host (a
+// PWA or UWP window can be any title), and End task must refuse it, since
+// terminating it closes every UWP app on the system rather than the one that
+// was clicked. `end_task` rejects it server-side regardless.
+const SHARED_UWP_HOST = "applicationframehost.exe";
+
+const HOST_PROCESSES = ["msedge.exe", "chrome.exe", "brave.exe", SHARED_UWP_HOST];
 export function isBrowserHost(path: string) {
 	const p = path.toLowerCase();
 	return HOST_PROCESSES.some((host) => p.includes(host));
@@ -1784,10 +1791,17 @@ const Dock = memo(function Dock() {
 							    No confirmation prompt, matching Windows. This is the escape
 							    hatch for an app that will not answer WM_CLOSE, and the apps
 							    it rescues are exactly the ones where a modal would be in the
-							    way. */}
+							    way.
+
+							    UWP apps are hidden rather than greyed out. Every one of them
+							    shares a single host process, so there is nothing the backend
+							    could terminate without also closing the other UWP apps on
+							    the system; showing an item that always refuses would be
+							    worse than not offering it. */}
 							{contextMenu.app.is_running &&
 								contextMenu.app.path !== "start" &&
-								!!contextMenu.app.executable && (
+								!!contextMenu.app.executable &&
+								contextMenu.app.executable.toLowerCase() !== SHARED_UWP_HOST && (
 									<>
 										{contextMenu.app.is_background && <div className="menu-divider" />}
 										<div

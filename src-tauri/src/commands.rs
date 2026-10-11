@@ -2924,6 +2924,9 @@ pub async fn close_window(hwnd: isize) {
     .unwrap_or_default();
 }
 
+/// The process that hosts every UWP app on the system. See `end_task`.
+const SHARED_UWP_HOST: &str = "applicationframehost.exe";
+
 /// Terminate every process running under `exe_name`, reproducing the Windows 11
 /// taskbar's "End task".
 ///
@@ -2939,6 +2942,13 @@ pub async fn close_window(hwnd: isize) {
 /// for an app that will not respond, and a prompt would defeat that; the tray
 /// apps it rescues are the ones that have no other route.
 ///
+/// Refuses `ApplicationFrameHost`, which cannot be refused safely by matching
+/// on name alone: every UWP app — Settings, Xbox, the Store, and anything else
+/// installed from it — runs inside that one process, so terminating it takes
+/// down apps the user never pointed at. Windows resolves each UWP app's real
+/// owner before killing it; doing the same is out of scope here, so declining
+/// outright is the honest answer.
+///
 /// Returns how many processes were terminated, which can be zero if the app had
 /// already exited between the click and the snapshot.
 #[tauri::command]
@@ -2946,6 +2956,12 @@ pub async fn end_task(exe_name: String) -> Result<u32, String> {
     let target = exe_name.trim().to_lowercase();
     if target.is_empty() {
         return Err("end_task needs an executable name".into());
+    }
+    if target == SHARED_UWP_HOST {
+        return Err(format!(
+            "{} hosts every UWP app, so ending it would close apps the user never selected",
+            target
+        ));
     }
     tauri::async_runtime::spawn_blocking(move || unsafe {
         use windows::Win32::Foundation::CloseHandle;
