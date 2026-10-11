@@ -46,7 +46,8 @@ import {
 	ChevronLeft,
 	ChevronRight,
 	Inbox,
-	Music
+	Music,
+	Sun
 } from "lucide-react";
 
 /**
@@ -3503,9 +3504,14 @@ function App() {
 														>
 															{brightnessState.monitors.map((monitor) => (
 																<div className="cc-classic-slider-row" key={monitor.index}>
-																	<div className="cc-classic-slider-label" title={monitor.name}>
+																	<div
+																		className="cc-classic-slider-label"
+																		title={`Display ${monitor.index + 1} — ${monitor.name}`}
+																	>
 																		<MonitorIcon />
-																		<span className="cc-monitor-name">{monitor.name}</span>
+																		<span className="cc-monitor-name">
+																			Display {monitor.index + 1}
+																		</span>
 																	</div>
 																	<div className="cc-classic-slider-track">
 																		<input
@@ -3985,21 +3991,11 @@ function MonitorIcon() {
 }
 
 function BrightnessLowIcon() {
-	return (
-		<svg
-			width="12"
-			height="12"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			strokeWidth="2"
-			strokeLinecap="round"
-			strokeLinejoin="round"
-			style={{ opacity: 0.5 }}
-		>
-			<circle cx="12" cy="12" r="5" fill="currentColor" />
-		</svg>
-	);
+	// This used to be a filled circle of radius 5 in a 24-unit box. At the 12px
+	// this row renders, that is a plain dot and reads as a bullet point rather
+	// than a brightness control. lucide's sun keeps the same stroke weight as
+	// every other icon in this file.
+	return <Sun size={12} strokeWidth={2} style={{ opacity: 0.5 }} />;
 }
 
 function MoonIcon() {

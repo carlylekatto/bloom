@@ -1872,20 +1872,32 @@ img {
 	width: 100%;
 }
 
-/* Keep the per-display tracks lined up with the master row above, which
-   carries a 16px toggle button plus a 10px gap on its trailing edge. */
+/* This padding is load-bearing. The master row ends with a 16px toggle plus
+   a 10px gap, 26px in total; these rows end at the percentage and have
+   nothing there. Without matching the reserve, flex hands that 26px to
+   the track and the slider comes out 175px against the master row's 149,
+   pushing the percentage out of line with the rows above. */
 .cc-monitor-list .cc-classic-slider-row {
 	padding-right: 26px;
 	box-sizing: border-box;
 }
 
-/* The label box is a fixed 75px, so a long EDID name has to truncate
-   instead of pushing the slider out of the row. */
+/* `min-width: 0` is what makes the ellipsis work at all. As a flex item the
+   span keeps an automatic minimum of its content width otherwise, so it
+   overflows the label instead of shrinking inside it. */
 .cc-monitor-name {
+	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+
+/* No label-width override here, deliberately. These rows read "Display 1",
+   which fits the same 75px box as "Volume" and "Brightness", so the rows
+   inherit the master geometry exactly: label, track start, track length and
+   the percentage all line up with the rows above. The model name lives in
+   the tooltip instead; a full EDID description runs to ~90px and would push
+   the track 26px shorter than the volume slider. */
 
 /* Small monitor button that opens the per-display breakdown */
 .cc-monitor-toggle {
