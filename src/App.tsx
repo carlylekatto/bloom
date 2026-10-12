@@ -19,6 +19,8 @@ import {
 	HeadphonesIcon,
 	MixerIcon
 } from "./icons";
+import { SunBrightnessIcon } from "./icons/SunBrightnessIcon";
+import { IconLab } from "./IconLab";
 import { AudioMixer } from "./components/AudioMixer";
 import { CompactMediaPlayer } from "./CompactMediaPlayer";
 import { useWeather } from "./hooks/useWeather";
@@ -46,8 +48,7 @@ import {
 	ChevronLeft,
 	ChevronRight,
 	Inbox,
-	Music,
-	Sun
+	Music
 } from "lucide-react";
 
 /**
@@ -415,6 +416,11 @@ interface ShelfItem {
 	timestamp: number;
 }
 
+/** Row size for the brightness icon. Its neighbours are pinned to 12px by
+ * `.cc-classic-slider-label svg`, so this one sets width/height inline, which
+ * beats the stylesheet. Tweak it here and reopen the icon lab to compare. */
+const BRIGHTNESS_ICON_SIZE = 14;
+
 /** One DDC/CI-capable display, as reported by `get_brightness_state`. */
 interface MonitorBrightness {
 	index: number;
@@ -740,7 +746,21 @@ function App() {
 	}, [isVisible, isHidden, windowLabel]);
 
 	useEffect(() => {
-		const updateRect = () => {
+		// One rect per 50ms. The notch height is spring-animated, so a single
+		// open, close, mixer or per-display toggle changes it on each of roughly
+		// eighteen frames. Forwarding every one of those put eighteen round trips
+		// across the IPC boundary inside a 200ms animation, which is what made
+		// the transitions stutter. The rect only has to keep up with the pointer:
+		// at 50ms it is still twenty times finer than a click, so coalescing
+		// costs nothing anyone could feel.
+		const RECT_INTERVAL_MS = 50;
+		let lastSent = 0;
+		let timer: number | null = null;
+
+		// Sends immediately. The explicit calls use this one, so a rect that has
+		// just settled is never left waiting on a timer.
+		const sendRect = () => {
+			lastSent = performance.now();
 			if (bloomRef.current && windowLabel === "main") {
 				// Activity bubbles sit beside the pill and must stay clickable too.
 				const rects = [bloomRef.current, musicBubbleRef.current, shelfBubbleRef.current]
@@ -760,16 +780,31 @@ function App() {
 				}).catch(() => {});
 			}
 		};
-		reportNotchRect.current = updateRect;
 
-		updateRect();
-		window.addEventListener("resize", updateRect);
-		const observer = new ResizeObserver(updateRect);
+		const scheduleRect = () => {
+			const wait = RECT_INTERVAL_MS - (performance.now() - lastSent);
+			if (wait <= 0) {
+				sendRect();
+				return;
+			}
+			if (timer !== null) return;
+			timer = window.setTimeout(() => {
+				timer = null;
+				sendRect();
+			}, wait);
+		};
+
+		reportNotchRect.current = sendRect;
+
+		sendRect();
+		window.addEventListener("resize", scheduleRect);
+		const observer = new ResizeObserver(scheduleRect);
 		if (bloomRef.current) observer.observe(bloomRef.current);
 
 		return () => {
-			window.removeEventListener("resize", updateRect);
+			window.removeEventListener("resize", scheduleRect);
 			observer.disconnect();
+			if (timer !== null) window.clearTimeout(timer);
 		};
 	}, [isExpanded, isHidden, windowLabel, scale]);
 
@@ -2505,10 +2540,15 @@ function App() {
 		// `isOpen` is the state that matches the rest of that rework, so the
 		// mixer offset is folded onto it rather than keeping the old variable.
 		if (bloomMode === "command-center") {
-			// The expanded per-display breakdown adds one row per display: an 18px
-			// row plus an 8px gap, matching the 8px layout rhythm the other rows
-			// use. Both this and the mixer below grow the same fixed-height column,
-			// so the window height has to carry the sum.
+			// 26px per display is the full cost of adding one, not just the row.
+			// A row is 18px and the list puts an 8px gap between rows, so N rows are
+			// 18 + 26*(N-1) -- and the list is itself a child of .cc-classic-sliders-area,
+			// whose 8px gap adds one more. Total 26*N.
+			//
+			// Getting this wrong is not cosmetic. The panel and its content must grow by
+			// the same amount every frame, or `.command-center-content-minimal`
+			// (`justify-content: space-between`) redistributes the slack and the Focus /
+			// energy saver row slides. Under-reserving by 8 moves that row 4px up.
 			const monitorRowsPx =
 				showMonitorBreakdown && brightnessState.perDisplay && brightnessState.monitors.length > 1
 					? brightnessState.monitors.length * 26
@@ -2551,8 +2591,20 @@ function App() {
 		}
 	}, [isOpen, bloomMode]);
 
+	// Icon comparison sheet, dev only. Bloom mixes three icon sources that
+	// disagree on weight, and the only reliable way to judge a new one is to
+	// see it beside the others on the notch background. Exposed as a console
+	// function so it costs nothing in the UI until asked for.
+	const [iconLabOpen, setIconLabOpen] = useState(false);
+	useEffect(() => {
+		if (!import.meta.env.DEV) return;
+		(window as unknown as { __iconLab?: () => void }).__iconLab = () =>
+			setIconLabOpen((open) => !open);
+	}, []);
+
 	return (
 		<div className="screen" style={{ overflow: "hidden" }}>
+			{iconLabOpen && <IconLab onClose={() => setIconLabOpen(false)} />}
 			{/* Screen Corners (Top) */}
 			<AnimatePresence>
 				{isVisible && settingsCornersEnabled && (
@@ -2634,7 +2686,7 @@ function App() {
 					style={{ originY: 0 }}
 					transition={{
 						width: { type: "spring", stiffness: 400, damping: 31 },
-						height: { type: "spring", stiffness: 450, damping: 29 },
+						height: { type: "spring", visualDuration: 0.2, bounce: 0.1 },
 						y: { type: "spring", stiffness: 550, damping: 45, mass: 0.8, restDelta: 0.001 },
 						opacity: { duration: 0.2 },
 						borderTopLeftRadius: { type: "spring", stiffness: 1000, damping: 40 },
@@ -3441,7 +3493,7 @@ function App() {
 												{/* Brightness Slider */}
 												<div className="cc-classic-slider-row">
 													<div className="cc-classic-slider-label">
-														<BrightnessLowIcon />
+														<SunBrightnessIcon size={BRIGHTNESS_ICON_SIZE} />
 														<span>Brightness</span>
 													</div>
 													<div className="cc-classic-slider-track">
@@ -3488,61 +3540,46 @@ function App() {
 													)}
 												</div>
 
-												{/* One slider per display. Like the mixer dock, this renders inside the container App.tsx reports to `update_notch_rect`, so the existing ResizeObserver covers the height change too. */}
-												<AnimatePresence initial={false}>
-													{showMonitorBreakdown && brightnessState.monitors.length > 1 && (
-														<motion.div
-															className="cc-monitor-list"
-															initial={{ opacity: 0, height: 0 }}
-															animate={{ opacity: 1, height: "auto" }}
-															exit={{ opacity: 0, height: 0 }}
-															transition={{
-																height: { type: "spring", stiffness: 450, damping: 29 },
-																opacity: { duration: 0.18, ease: "easeOut" }
-															}}
-															style={{ overflow: "hidden" }}
-														>
-															{brightnessState.monitors.map((monitor) => (
-																<div className="cc-classic-slider-row" key={monitor.index}>
-																	<div
-																		className="cc-classic-slider-label"
-																		title={`Display ${monitor.index + 1} — ${monitor.name}`}
-																	>
-																		<MonitorIcon />
-																		<span className="cc-monitor-name">
-																			Display {monitor.index + 1}
-																		</span>
-																	</div>
-																	<div className="cc-classic-slider-track">
-																		<input
-																			type="range"
-																			min="0"
-																			max="100"
-																			step="1"
-																			value={monitor.brightness}
-																			onChange={(e) =>
-																				handleMonitorBrightnessChange(
-																					monitor.index,
-																					parseInt(e.target.value)
-																				)
-																			}
-																			onPointerDown={(e) => e.stopPropagation()}
-																			onClick={(e) => e.stopPropagation()}
-																			className="cc-classic-input"
-																		/>
-																		<div
-																			className="cc-classic-fill"
-																			style={{ width: `${monitor.brightness}%` }}
-																		/>
-																	</div>
-																	<span className="cc-classic-percentage">
-																		{monitor.brightness}%
+												{showMonitorBreakdown && brightnessState.monitors.length > 1 && (
+													<div className="cc-monitor-list">
+														{brightnessState.monitors.map((monitor) => (
+															<div className="cc-classic-slider-row" key={monitor.index}>
+																<div
+																	className="cc-classic-slider-label"
+																	title={`Display ${monitor.index + 1} — ${monitor.name}`}
+																>
+																	<MonitorIcon />
+																	<span className="cc-monitor-name">
+																		Display {monitor.index + 1}
 																	</span>
 																</div>
-															))}
-														</motion.div>
-													)}
-												</AnimatePresence>
+																<div className="cc-classic-slider-track">
+																	<input
+																		type="range"
+																		min="0"
+																		max="100"
+																		step="1"
+																		value={monitor.brightness}
+																		onChange={(e) =>
+																			handleMonitorBrightnessChange(
+																				monitor.index,
+																				parseInt(e.target.value)
+																			)
+																		}
+																		onPointerDown={(e) => e.stopPropagation()}
+																		onClick={(e) => e.stopPropagation()}
+																		className="cc-classic-input"
+																	/>
+																	<div
+																		className="cc-classic-fill"
+																		style={{ width: `${monitor.brightness}%` }}
+																	/>
+																</div>
+																<span className="cc-classic-percentage">{monitor.brightness}%</span>
+															</div>
+														))}
+													</div>
+												)}
 											</div>
 										</motion.div>
 									)}
@@ -3988,14 +4025,6 @@ function MonitorIcon() {
 			<line x1="12" y1="17" x2="12" y2="21" />
 		</svg>
 	);
-}
-
-function BrightnessLowIcon() {
-	// This used to be a filled circle of radius 5 in a 24-unit box. At the 12px
-	// this row renders, that is a plain dot and reads as a bullet point rather
-	// than a brightness control. lucide's sun keeps the same stroke weight as
-	// every other icon in this file.
-	return <Sun size={12} strokeWidth={2} style={{ opacity: 0.5 }} />;
 }
 
 function MoonIcon() {
