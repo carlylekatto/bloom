@@ -2604,7 +2604,13 @@ function App() {
 
 	return (
 		<div className="screen" style={{ overflow: "hidden" }}>
-			{iconLabOpen && <IconLab onClose={() => setIconLabOpen(false)} />}
+			{/* The dev check has to sit here, not only inside the effect above.
+			    Guarding the effect stops the lab opening but leaves the static
+			    import in the graph, so Rollup keeps the module and ships it: the
+			    release bundle grew by 5KB of code that can never render. Written
+			    this way Vite substitutes `false` and the whole branch, reference
+			    and all, is dropped. */}
+			{import.meta.env.DEV && iconLabOpen && <IconLab onClose={() => setIconLabOpen(false)} />}
 			{/* Screen Corners (Top) */}
 			<AnimatePresence>
 				{isVisible && settingsCornersEnabled && (
