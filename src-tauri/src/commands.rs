@@ -458,6 +458,21 @@ pub async fn change_notch_mode(app: AppHandle, mode: String) {
 }
 
 fn get_uwp_launch_cmd(exe_path: &str) -> Option<String> {
+    // A packaged app can only be started through its AppUserModelID, and the
+    // application part after `!` is whatever the package declares ("Claude",
+    // not always "App"). Look the real one up; guess `!App` only if that fails.
+    if let Some(family) = package_family_from_windows_apps_path(exe_path) {
+        unsafe {
+            let _ = windows::Win32::System::Com::CoInitializeEx(
+                None,
+                windows::Win32::System::Com::COINIT_MULTITHREADED,
+            );
+        }
+        if let Some(aumid) = find_aumid_by_family(&family) {
+            return Some(format!("shell:AppsFolder\\{aumid}"));
+        }
+    }
+
     let path = std::path::Path::new(exe_path);
     let mut is_windows_apps = false;
     let mut package_folder = String::new();
@@ -1800,6 +1815,27 @@ pub fn save_pinned_apps(app: AppHandle, apps: Vec<AppInfo>) -> Result<(), String
     Ok(())
 }
 
+/// Apps pinned while running were saved under their executable's name
+/// ("WhatsApp.Root", "localsend_app"). Gives those their Start menu name, once
+/// the installed-apps scan has results: the dock loads its pins again when the
+/// scan emits `installed-apps-updated`, then saves the corrected list. Names
+/// that differ from the file name are kept as they are.
+fn refresh_pinned_names(mut apps: Vec<AppInfo>) -> Vec<AppInfo> {
+    for app in &mut apps {
+        let stem = std::path::Path::new(&app.path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        if stem.is_empty() || !app.name.eq_ignore_ascii_case(stem) {
+            continue;
+        }
+        if let Some(name) = installed_app_name(&app.path) {
+            app.name = name;
+        }
+    }
+    apps
+}
+
 #[tauri::command]
 pub async fn load_pinned_apps(app: AppHandle) -> Vec<AppInfo> {
     let path = app
@@ -1808,8 +1844,10 @@ pub async fn load_pinned_apps(app: AppHandle) -> Vec<AppInfo> {
         .unwrap_or_default()
         .join("pinned_apps.json");
     if let Ok(content) = std::fs::read_to_string(path) {
-        if let Ok(apps) = serde_json::from_str(&content) {
-            return apps;
+        if let Ok(apps) = serde_json::from_str::<Vec<AppInfo>>(&content) {
+            return tauri::async_runtime::spawn_blocking(move || refresh_pinned_names(apps))
+                .await
+                .unwrap_or_default();
         }
     }
     vec![
@@ -2547,6 +2585,61 @@ pub(crate) unsafe fn process_image_path(pid: u32) -> Option<String> {
     let _ = CloseHandle(handle);
     res.ok()?;
     Some(String::from_utf16_lossy(&buf[..size as usize]))
+}
+
+/// The name an app goes by in the Start menu, from the installed-apps scan:
+/// a packaged app by its AppUserModelID or package family, a desktop app by
+/// its executable. Programs often leave their own description unset or set it
+/// to an internal name ("WhatsApp.Root", "localsend_app"), so this is the
+/// preferred label for running and tray apps. `None` when the scan has no
+/// single answer, e.g. a browser executable shared by several web apps.
+pub(crate) fn installed_app_name(path_or_aumid: &str) -> Option<String> {
+    let apps = INSTALLED_APPS_CACHE.get()?.lock().ok()?;
+    let unique = |names: Vec<&str>| -> Option<String> {
+        let (first, rest) = names.split_first()?;
+        rest.iter()
+            .all(|n| n.eq_ignore_ascii_case(first))
+            .then(|| first.to_string())
+    };
+
+    if path_or_aumid.contains('!') && !path_or_aumid.contains('\\') {
+        return apps
+            .iter()
+            .find(|app| app.path.eq_ignore_ascii_case(path_or_aumid))
+            .map(|app| app.name.clone());
+    }
+    if let Some(family) = package_family_from_windows_apps_path(path_or_aumid) {
+        let prefix = format!("{}!", family.to_lowercase());
+        if let Some(name) = unique(
+            apps.iter()
+                .filter(|app| app.path.to_lowercase().starts_with(&prefix))
+                .map(|app| app.name.as_str())
+                .collect(),
+        ) {
+            return Some(name);
+        }
+    }
+    let exe = std::path::Path::new(path_or_aumid).file_name()?.to_str()?;
+    unique(
+        apps.iter()
+            .filter(|app| {
+                app.executable
+                    .as_deref()
+                    .is_some_and(|e| e.eq_ignore_ascii_case(exe))
+            })
+            .map(|app| app.name.as_str())
+            .collect(),
+    )
+}
+
+/// Label for a running or tray app: its Start menu name when known, else the
+/// executable's own description, else its file name.
+pub(crate) fn app_display_name(exe_path: &str, aumid: Option<&str>) -> String {
+    aumid
+        .filter(|id| id.contains('!'))
+        .and_then(installed_app_name)
+        .or_else(|| installed_app_name(exe_path))
+        .unwrap_or_else(|| unsafe { friendly_process_name(exe_path) })
 }
 
 /// Friendly name for an executable: the shell's `FileDescription` from version

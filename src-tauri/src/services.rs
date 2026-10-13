@@ -3043,6 +3043,11 @@ pub fn trigger_app_scan() {
             }
         }
         IS_SCANNING.store(false, Ordering::Relaxed);
+        // Pinned dock items saved under their executable's name pick up their
+        // Start menu name once this list exists (see refresh_pinned_names).
+        if let Some(app) = crate::state::DISPLAY_MONITOR_HANDLE.get() {
+            let _ = app.emit("installed-apps-updated", ());
+        }
     });
 }
 
@@ -3650,7 +3655,9 @@ pub unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> B
                     } else if name == "explorer" && title.is_empty() {
                         "File Explorer".to_string()
                     } else {
-                        name.clone()
+                        // The Start menu name ("WhatsApp", "LocalSend") rather than
+                        // the executable's ("WhatsApp.Root", "localsend_app").
+                        crate::commands::app_display_name(&path, window_aumid.as_deref())
                     };
 
                     // Only avoid adding the exact same window handle (HWND) multiple times

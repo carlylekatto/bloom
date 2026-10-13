@@ -408,6 +408,24 @@ const Dock = memo(function Dock() {
 		};
 		init();
 
+		// The installed-apps scan finishes after the first load; pins saved under
+		// their executable's name then get their Start menu name.
+		const unlistenInstalledApps = listen("installed-apps-updated", async () => {
+			try {
+				const refreshed = await invoke<AppInfo[]>("load_pinned_apps");
+				const names = new Map(refreshed.map((a) => [a.path, a.name]));
+				setPinnedApps((prev) => {
+					const next = prev.map((a) => ({ ...a, name: names.get(a.path) ?? a.name }));
+					if (!next.some((a, i) => a.name !== prev[i].name)) return prev;
+					// Pins are otherwise saved only when they change; keep the names.
+					queueMicrotask(() => {
+						invoke("save_pinned_apps", { apps: next }).catch(console.error);
+					});
+					return next;
+				});
+			} catch (_) {}
+		});
+
 		const unlistenOverlap = listen<boolean>("dock-overlap", (event) => {
 			setIsOverlapped(event.payload);
 		});
@@ -426,6 +444,7 @@ const Dock = memo(function Dock() {
 
 		return () => {
 			unlistenOverlap.then((f) => f());
+			unlistenInstalledApps.then((f) => f());
 			unlistenEdgeHover.then((f) => f());
 			unlistenVisibility.then((f) => f());
 			unlistenMaximized.then((f) => f());
