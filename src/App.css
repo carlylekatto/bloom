@@ -1944,13 +1944,20 @@ img {
 	width: 100%;
 }
 
-/* This padding is load-bearing. The master row ends with a 16px toggle plus
-   a 10px gap, 26px in total; these rows end at the percentage and have
-   nothing there. Without matching the reserve, flex hands that 26px to
-   the track and the slider comes out 175px against the master row's 149,
-   pushing the percentage out of line with the rows above. */
-.cc-monitor-list .cc-classic-slider-row {
-	padding-right: 26px;
+/* This padding is load-bearing, and it belongs to every row that has no
+   trailing toggle, not only to the per-display rows.
+
+   A row with a toggle ends with an 18px control plus the row's 10px gap, 28px
+   in total. A row without one ends at the percentage and leaves that 28px
+   unclaimed, so flex hands the slack to the track: the slider comes out
+   longer than the row above and the percentage sits out of line with it.
+
+   Two rows land on the wrong side of this. The per-display rows here, and the
+   master brightness slider on any machine with a single DDC/CI display, where
+   `per_display` is false so the monitor toggle is never rendered -- that is
+   the one-monitor case, and it needs no separate rule. */
+.cc-classic-slider-row:not(:has(> .volume-mixer-toggle)):not(:has(> .cc-monitor-toggle)) {
+	padding-right: 28px;
 	box-sizing: border-box;
 }
 
@@ -1972,11 +1979,14 @@ img {
    the track 26px shorter than the volume slider. */
 
 /* Small monitor button that opens the per-display breakdown */
+/* 18px wide, not 16px: `.volume-mixer-toggle` at the end of the row above is
+   18px, and a narrower tail here leaves the brightness track 2px longer than
+   the volume one on every machine that has more than one DDC/CI display. */
 .cc-monitor-toggle {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 16px;
+	width: 18px;
 	height: 16px;
 	padding: 0;
 	border: 1px solid transparent;
