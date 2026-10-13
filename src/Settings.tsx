@@ -200,6 +200,8 @@ function SettingsApp() {
 							toggleDockPreview={settings.toggleDockPreview}
 							dockIconOnly={settings.dockIconOnly}
 							toggleDockIconOnly={settings.toggleDockIconOnly}
+							dockShowTrayApps={settings.dockShowTrayApps}
+							toggleDockShowTrayApps={settings.toggleDockShowTrayApps}
 							dockSeparatorEnabled={settings.dockSeparatorEnabled}
 							toggleDockSeparator={settings.toggleDockSeparator}
 							dockAdaptive={settings.dockAdaptive}

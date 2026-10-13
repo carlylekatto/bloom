@@ -146,6 +146,9 @@ const Dock = memo(function Dock() {
 	const [dockSeparatorEnabled, setDockSeparatorEnabled] = useState(
 		() => localStorage.getItem("bloom-dock-separator-enabled") !== "false"
 	);
+	const [dockShowTrayApps, setDockShowTrayApps] = useState(
+		() => localStorage.getItem("bloom-dock-show-tray-apps") !== "false"
+	);
 	const [dockAdaptive, setDockAdaptive] = useState(
 		() => localStorage.getItem("bloom-dock-adaptive") === "true"
 	);
@@ -315,9 +318,7 @@ const Dock = memo(function Dock() {
 						hasCard ? Math.max(pill.right, card.right) - Math.min(pill.x, card.x) : pill.width
 					),
 					height: Math.round(
-						hasCard
-							? Math.max(pill.bottom, card.bottom) - Math.min(pill.y, card.y)
-							: pill.height
+						hasCard ? Math.max(pill.bottom, card.bottom) - Math.min(pill.y, card.y) : pill.height
 					)
 				}
 			}).catch(() => {});
@@ -374,6 +375,9 @@ const Dock = memo(function Dock() {
 
 			const separator = getVal("bloom-dock-separator-enabled", "true");
 			setDockSeparatorEnabled(separator === "true");
+
+			const showTrayApps = getVal("bloom-dock-show-tray-apps", "true");
+			setDockShowTrayApps(showTrayApps !== "false");
 
 			const adaptive = getVal("bloom-dock-adaptive", "false");
 			setDockAdaptive(adaptive === "true");
@@ -432,6 +436,7 @@ const Dock = memo(function Dock() {
 		"bloom-dock-preview-enabled": setDockPreviewEnabled,
 		"bloom-dock-icon-only": setDockIconOnly,
 		"bloom-dock-separator-enabled": setDockSeparatorEnabled,
+		"bloom-dock-show-tray-apps": setDockShowTrayApps,
 		"bloom-dock-adaptive": setDockAdaptive,
 		"bloom-start-icon": setStartIcon,
 		"bloom-scale": setScale,
@@ -496,7 +501,11 @@ const Dock = memo(function Dock() {
 				)
 			);
 			observedTrayPathsRef.current = selected.observed;
-			const running = mergeTrayApps(windows, selected.visible);
+			// Tray apps stay in the dock by default, which is what upstream PR #168
+			// set out to do: an app that closes its window to the tray remains
+			// reachable without hunting for it in the overflow. With the setting
+			// off the dock follows the Windows taskbar and shows only real windows.
+			const running = dockShowTrayApps ? mergeTrayApps(windows, selected.visible) : windows;
 			setActiveApps(running);
 
 			setActiveOrder((prev) => {
@@ -523,7 +532,7 @@ const Dock = memo(function Dock() {
 			clearInterval(interval);
 			unlistenWindowChange.then((f) => f());
 		};
-	}, [isDragging, pinnedApps]);
+	}, [isDragging, pinnedApps, dockShowTrayApps]);
 
 	const fetchIcon = async (path: string, name?: string, hwnd?: number, retryCount = 0) => {
 		const isHost = isBrowserHost(path);
@@ -1010,7 +1019,9 @@ const Dock = memo(function Dock() {
 						// sends it, the preview no longer reads it.
 						const captured = results
 							.filter(
-								(r): r is {
+								(
+									r
+								): r is {
 									hwnd: number;
 									title: string;
 									image: string;
@@ -1145,7 +1156,9 @@ const Dock = memo(function Dock() {
 					style={{ originX: 0.5, originY: 1, minWidth: 34 }}
 					onContextMenu={(e) => handleContextMenu(e, null)}
 				>
-					<div className={`edge-surface edge-surface--bottom ${isExpanded && !isHidden ? "show-flares" : ""}`} />
+					<div
+						className={`edge-surface edge-surface--bottom ${isExpanded && !isHidden ? "show-flares" : ""}`}
+					/>
 					<AnimatePresence>
 						{isExpanded && (
 							<motion.div
@@ -1288,11 +1301,11 @@ const Dock = memo(function Dock() {
 																			key={prev.hwnd}
 																			className="preview-item"
 																			onClick={() =>
-														invoke("focus_window", {
-															hwnd: prev.hwnd,
-															explicitWindow: true
-														})
-													}
+																				invoke("focus_window", {
+																					hwnd: prev.hwnd,
+																					explicitWindow: true
+																				})
+																			}
 																		>
 																			<img src={prev.image} alt={`Preview ${idx}`} />
 																			<div className="preview-label">{prev.title || app.name}</div>
@@ -1458,11 +1471,11 @@ const Dock = memo(function Dock() {
 																	key={prev.hwnd}
 																	className="preview-item"
 																	onClick={() =>
-														invoke("focus_window", {
-															hwnd: prev.hwnd,
-															explicitWindow: true
-														})
-													}
+																		invoke("focus_window", {
+																			hwnd: prev.hwnd,
+																			explicitWindow: true
+																		})
+																	}
 																>
 																	<img src={prev.image} alt={`Preview ${idx}`} />
 																	<div className="preview-label">{prev.title || app.name}</div>
@@ -1820,9 +1833,7 @@ const Dock = memo(function Dock() {
 												}
 											}}
 										>
-											{(contextMenu.app.all_hwnds?.length ?? 0) > 1
-												? "End all tasks"
-												: "End task"}
+											{(contextMenu.app.all_hwnds?.length ?? 0) > 1 ? "End all tasks" : "End task"}
 										</div>
 									</>
 								)}

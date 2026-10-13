@@ -78,6 +78,12 @@ export function useSettings() {
 	const [dockSeparatorEnabled, setDockSeparatorEnabled] = useState(
 		() => localStorage.getItem("bloom-dock-separator-enabled") !== "false"
 	);
+	// Upstream keeps tray apps in the dock (PR #168), so an app that closes its
+	// window to the tray stays as a background dock item. Off means the dock
+	// behaves like the Windows taskbar and hides them behind the tray instead.
+	const [dockShowTrayApps, setDockShowTrayApps] = useState(
+		() => localStorage.getItem("bloom-dock-show-tray-apps") !== "false"
+	);
 	const [startIcon, setStartIcon] = useState(
 		() => localStorage.getItem("bloom-start-icon") || "default"
 	);
@@ -189,6 +195,7 @@ export function useSettings() {
 			apply(getVal("bloom-dock-preview-enabled"), setDockPreviewEnabled, readBool);
 			apply(getVal("bloom-dock-icon-only"), setDockIconOnly, readBool);
 			apply(getVal("bloom-dock-separator-enabled"), setDockSeparatorEnabled, readBool);
+			apply(getVal("bloom-dock-show-tray-apps"), setDockShowTrayApps, readBool);
 			apply(getVal("bloom-start-icon"), setStartIcon, (v) => v);
 			apply(getVal("bloom-dock-adaptive"), setDockAdaptive, readBool);
 			apply(getVal("bloom-dock-win-number-enabled"), setDockWinNumberEnabled, readBool);
@@ -252,6 +259,7 @@ export function useSettings() {
 		"bloom-dock-enabled": setDockEnabled,
 		"bloom-dock-icon-only": setDockIconOnly,
 		"bloom-dock-separator-enabled": setDockSeparatorEnabled,
+		"bloom-dock-show-tray-apps": setDockShowTrayApps,
 		"bloom-start-icon": setStartIcon,
 		"bloom-dock-preview-enabled": setDockPreviewEnabled,
 		"bloom-dock-adaptive": setDockAdaptive,
@@ -533,6 +541,12 @@ export function useSettings() {
 		const next = !dockSeparatorEnabled;
 		setDockSeparatorEnabled(next);
 		saveSetting("bloom-dock-separator-enabled", String(next));
+	};
+
+	const toggleDockShowTrayApps = () => {
+		const next = !dockShowTrayApps;
+		setDockShowTrayApps(next);
+		saveSetting("bloom-dock-show-tray-apps", String(next));
 	};
 
 	const handleStartIconChange = (icon: string) => {
@@ -884,9 +898,11 @@ export function useSettings() {
 		dockPreviewEnabled,
 		toggleDockPreview,
 		dockIconOnly,
+		dockShowTrayApps,
 		toggleDockIconOnly,
 		dockSeparatorEnabled,
 		toggleDockSeparator,
+		toggleDockShowTrayApps,
 		startIcon,
 		handleStartIconChange,
 		dockAdaptive,

@@ -15,7 +15,8 @@ import {
 	FolderOpen,
 	FolderPlus,
 	Plus,
-	X
+	X,
+	Inbox
 } from "lucide-react";
 import { SettingRow } from "./SettingRow";
 import { KNOWN_FOLDER_OPTIONS, parseEnabledFolders, parseCustomFolders } from "../dockExtras";
@@ -51,7 +52,9 @@ interface DockTabProps {
 	dockPreviewEnabled: boolean;
 	toggleDockPreview: () => void;
 	dockIconOnly: boolean;
+	dockShowTrayApps: boolean;
 	toggleDockIconOnly: () => void;
+	toggleDockShowTrayApps: () => void;
 	dockSeparatorEnabled: boolean;
 	toggleDockSeparator: () => void;
 	dockAdaptive: boolean;
@@ -81,6 +84,8 @@ export function DockTab({
 	dockPreviewEnabled,
 	toggleDockPreview,
 	dockIconOnly,
+	dockShowTrayApps,
+	toggleDockShowTrayApps,
 	toggleDockIconOnly,
 	dockSeparatorEnabled,
 	toggleDockSeparator,
@@ -152,6 +157,21 @@ export function DockTab({
 						<SettingRow icon={Circle} label="Icon Only" desc="Remove icon background and padding">
 							<label className="toggle-switch">
 								<input type="checkbox" checked={dockIconOnly} onChange={toggleDockIconOnly} />
+								<span className="slider"></span>
+							</label>
+						</SettingRow>
+
+						<SettingRow
+							icon={Inbox}
+							label="Tray Apps in Dock"
+							desc="Keep apps that close to the tray visible in the dock. Turn off to match the Windows taskbar, which hides them behind the tray overflow."
+						>
+							<label className="toggle-switch">
+								<input
+									type="checkbox"
+									checked={dockShowTrayApps}
+									onChange={toggleDockShowTrayApps}
+								/>
 								<span className="slider"></span>
 							</label>
 						</SettingRow>
