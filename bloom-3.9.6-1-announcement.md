@@ -5,8 +5,8 @@ Bản này **thêm khá nhiều thứ**, và một thứ **đổi hành vi mặc
 | | |
 |---|---|
 | **Phiên bản** | `3.9.6-1` |
-| **Dung lượng** | `16.73` MB |
-| **SHA256** | `6B9441DA60701EE63AAEBA5E02F8B84C07513F8C02D2DC5E5B786F64C81683C4` |
+| **Dung lượng** | `16.74` MB |
+| **SHA256** | `05A74E8CE512BF7E232FDC1699F279030C63C43CFBB7BD4374EE8909A9E1DF9F` |
 
 ---
 
@@ -89,6 +89,16 @@ Chuột phải vào icon Thùng rác, ổ đĩa hay thư mục trong dock, trư�
 | **Empty Recycle Bin** | thùng rác — **có hỏi lại trước**, không hoàn tác được |
 
 Mục Eject vẫn có cho ổ USB và ổ đĩa, Remove from Dock vẫn có cho thư mục tự thêm.
+
+### 🐛 Sửa lỗi dock và tray
+
+**Menu tray mở đúng chỗ bấm.** Trước đó app mở menu tray tại icon thông báo của nó — mà icon đó nằm ở góc taskbar đang bị Bloom giấu. Nên bấm chuột phải vào app trong dock thì menu cứ nhảy về **góc phải dưới màn hình**. Giờ nó mở ngay cạnh icon, và giữ đúng màn hình bạn đang bấm.
+
+**Bấm app đã cài dạng MSIX giờ chạy được.** Claude, WhatsApp và các app đóng gói khác trước đây bấm vào **không làm gì cả**, vì Bloom đoán sai ID. Giờ tra đúng ID thật trong Windows.
+
+**Tên app đúng như Start menu.** Trước là tên file nội bộ: *"WhatsApp.Root"*, *"localsend_app"*, *"AppleMusic"*. Giờ lấy đúng tên Start menu hiện. App bạn ghim sẵn cũng được sửa lại tên một lần nữa.
+
+**App tray không có tên không còn bị từ chối.** Một số app không đặt tooltip cho icon tray, hoặc đăng ký lại sau khi Explorer khởi động — trước đó mọi thao tác trên icon đó đều báo lỗi *"Windows returned an unnamed tray icon"*. Giờ vẫn chạy, vẫn kiểm tra đúng app không bị nhầm.
 
 ---
 
