@@ -307,16 +307,20 @@ struct RecycleBinState {
 
 static RECYCLE_BIN_STATE: OnceLock<Mutex<RecycleBinState>> = OnceLock::new();
 
-/// Whether the bin holds anything, refreshed at most once a minute: the query
-/// scans every volume and the dock polls every few seconds.
-fn recycle_bin_full() -> bool {
-    use windows::Win32::UI::Shell::{SHQueryRecycleBinW, SHQUERYRBINFO};
-    let state = RECYCLE_BIN_STATE.get_or_init(|| {
+fn recycle_bin_cache() -> &'static Mutex<RecycleBinState> {
+    RECYCLE_BIN_STATE.get_or_init(|| {
         Mutex::new(RecycleBinState {
             full: false,
             checked_ms: 0,
         })
-    });
+    })
+}
+
+/// Whether the bin holds anything, refreshed at most once a minute: the query
+/// scans every volume and the dock polls every few seconds.
+fn recycle_bin_full() -> bool {
+    use windows::Win32::UI::Shell::{SHQueryRecycleBinW, SHQUERYRBINFO};
+    let state = recycle_bin_cache();
     if let Ok(guard) = state.lock() {
         if crate::utils::get_now_ms() - guard.checked_ms < 60_000 {
             return guard.full;
@@ -409,6 +413,63 @@ fn shell_execute(file: &str, params: Option<&str>, verb: &str) -> Result<(), Str
         return Err(format!("Could not open {}", file));
     }
     Ok(())
+}
+
+/// What the extras context menu can ask for. An allow-list rather than a free
+/// verb string: every one of these is a single click away, and `ShellExecuteW`
+/// takes any verb at all, so passing one through would let a stray click reach
+/// an action this menu never offered.
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum ExtraAction {
+    /// Reveal the item in its parent folder, selected.
+    Select,
+    /// The shell's own property sheet.
+    Properties,
+    /// Empty the bin on every volume.
+    EmptyBin,
+}
+
+/// Empties every volume's bin.
+///
+/// `SHERB_NOCONFIRMATION` suppresses Windows' own prompt because the frontend
+/// asks first, and does not move the prompt into a native dialog Bloom cannot
+/// position. Dropping the cache entry matters more: `recycle_bin_full` holds
+/// its answer for a minute, and without this the bin icon would still read
+/// full right after emptying it, which looks like the empty silently failed.
+fn empty_recycle_bin() -> Result<(), String> {
+    use windows::Win32::UI::Shell::{
+        SHEmptyRecycleBinW, SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI, SHERB_NOSOUND,
+    };
+    if let Ok(mut guard) = recycle_bin_cache().lock() {
+        guard.checked_ms = 0;
+    }
+    unsafe { SHEmptyRecycleBinW(None, None, SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND) }
+        .map_err(|_| "Could not empty the Recycle Bin".to_string())
+}
+
+#[tauri::command]
+pub async fn dock_extra_action(path: Option<String>, action: ExtraAction) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || match action {
+        ExtraAction::Select => {
+            let path = path.ok_or_else(|| "No path for this item".to_string())?;
+            // `explorer.exe /select,"<path>"` is the only documented way to
+            // reveal an item. The quotes have to survive into the command line,
+            // and the comma must sit directly in front of them.
+            shell_execute(
+                "explorer.exe",
+                Some(&format!("/select,\"{}\"", path)),
+                "open",
+            )
+        }
+        ExtraAction::Properties => {
+            let path = path.ok_or_else(|| "No path for this item".to_string())?;
+            shell_execute(&path, None, "properties")
+        }
+        ExtraAction::EmptyBin => empty_recycle_bin(),
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

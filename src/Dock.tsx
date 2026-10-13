@@ -2,6 +2,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef, memo } from "rea
 import { motion, AnimatePresence, Reorder } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import "./Dock.css";
 import { EdgeSurface } from "./components/EdgeSurface";
 import { initTheme } from "./theme";
@@ -739,6 +740,37 @@ const Dock = memo(function Dock() {
 	const ejectExtra = (extra: DockExtra) => {
 		closeMenu();
 		invoke("eject_dock_extra", { path: extra.path }).catch(showActionError);
+	};
+
+	// `select` and `properties` only. The backend takes an enum rather than a
+	// free verb string, so this list and the Rust one have to agree; a shell
+	// verb is a single click away and `ShellExecuteW` would accept anything.
+	const extraAction = (extra: DockExtra, action: "select" | "properties") => {
+		closeMenu();
+		invoke("dock_extra_action", { path: extra.path, action }).catch(showActionError);
+	};
+
+	const copyExtraPath = (extra: DockExtra) => {
+		closeMenu();
+		// The dock webview does not hold focus, so `navigator.clipboard` would
+		// be refused. The plugin writes through the OS instead.
+		writeText(extra.path).catch(showActionError);
+	};
+
+	const emptyRecycleBin = async () => {
+		closeMenu();
+		const { ask } = await import("@tauri-apps/plugin-dialog");
+		const confirmed = await ask(
+			"Everything in the Recycle Bin will be deleted, on every drive. This cannot be undone.",
+			{
+				title: "Empty Recycle Bin",
+				kind: "warning",
+				okLabel: "Empty Recycle Bin",
+				cancelLabel: "Cancel"
+			}
+		);
+		if (!confirmed) return;
+		invoke("dock_extra_action", { path: null, action: "emptyBin" }).catch(showActionError);
 	};
 
 	const removeExtraFromDock = (extra: DockExtra) => {
@@ -1638,10 +1670,43 @@ const Dock = memo(function Dock() {
 							>
 								Open
 							</div>
+							{/* The bin's path is `shell:RecycleBinFolder`, which is a shell
+							    namespace rather than a file, so neither the select verb
+							    nor the property sheet has anything to point at. */}
+							{contextMenu.extra.kind !== "recycle-bin" && (
+								<>
+									<div
+										className="menu-item"
+										onClick={() => extraAction(contextMenu.extra!, "select")}
+									>
+										Show in File Explorer
+									</div>
+									<div
+										className="menu-item"
+										onClick={() => extraAction(contextMenu.extra!, "properties")}
+									>
+										Properties
+									</div>
+								</>
+							)}
+							<div className="menu-item" onClick={() => copyExtraPath(contextMenu.extra!)}>
+								Copy Path
+							</div>
+							{contextMenu.extra.kind === "recycle-bin" && (
+								<>
+									<div className="menu-divider" />
+									<div className="menu-item quit" onClick={() => emptyRecycleBin()}>
+										Empty Recycle Bin
+									</div>
+								</>
+							)}
 							{contextMenu.extra.kind === "drive" && contextMenu.extra.removable && (
-								<div className="menu-item" onClick={() => ejectExtra(contextMenu.extra!)}>
-									Eject
-								</div>
+								<>
+									<div className="menu-divider" />
+									<div className="menu-item" onClick={() => ejectExtra(contextMenu.extra!)}>
+										Eject
+									</div>
+								</>
 							)}
 							{contextMenu.extra.kind === "custom" && (
 								<>
