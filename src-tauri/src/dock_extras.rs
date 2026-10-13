@@ -419,13 +419,21 @@ fn shell_execute(file: &str, params: Option<&str>, verb: &str) -> Result<(), Str
 /// verb string: every one of these is a single click away, and `ShellExecuteW`
 /// takes any verb at all, so passing one through would let a stray click reach
 /// an action this menu never offered.
+///
+/// There is no `Properties` variant, and the verb is not an oversight.
+/// `properties` is unusable from a shell verb: `ShellExecuteW` answers
+/// SE_ERR_NOASSOC (31) for a drive root, a folder and a file alike, so it never
+/// reaches the shell; `ShellExecuteExW` with no mask turns that into a modal
+/// error dialog; `SEE_MASK_INVOKEIDLIST` returns success without opening
+/// anything. The real route is `IContextMenu` -- build the item's context menu
+/// and `InvokeCommand` its properties entry -- which is about a hundred lines
+/// of unsafe COM and is not in this build. Recorded so the verb does not get
+/// tried a fourth time.
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum ExtraAction {
     /// Reveal the item in its parent folder, selected.
     Select,
-    /// The shell's own property sheet.
-    Properties,
     /// Empty the bin on every volume.
     EmptyBin,
 }
@@ -461,10 +469,6 @@ pub async fn dock_extra_action(path: Option<String>, action: ExtraAction) -> Res
                 Some(&format!("/select,\"{}\"", path)),
                 "open",
             )
-        }
-        ExtraAction::Properties => {
-            let path = path.ok_or_else(|| "No path for this item".to_string())?;
-            shell_execute(&path, None, "properties")
         }
         ExtraAction::EmptyBin => empty_recycle_bin(),
     })

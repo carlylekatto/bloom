@@ -85,7 +85,6 @@ Chuột phải vào icon Thùng rác, ổ đĩa hay thư mục trong dock, trư�
 | Mục | Áp dụng cho |
 |---|---|
 | **Show in File Explorer** | ổ đĩa, thư mục — mở thư mục cha và chọn sẵn món đó |
-| **Properties** | ổ đĩa, thư mục — bảng thuộc tính của Windows |
 | **Copy Path** | tất cả — copy đường dẫn vào clipboard |
 | **Empty Recycle Bin** | thùng rác — **có hỏi lại trước**, không hoàn tác được |
 

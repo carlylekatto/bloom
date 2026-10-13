@@ -742,10 +742,10 @@ const Dock = memo(function Dock() {
 		invoke("eject_dock_extra", { path: extra.path }).catch(showActionError);
 	};
 
-	// `select` and `properties` only. The backend takes an enum rather than a
-	// free verb string, so this list and the Rust one have to agree; a shell
-	// verb is a single click away and `ShellExecuteW` would accept anything.
-	const extraAction = (extra: DockExtra, action: "select" | "properties") => {
+	// `select` only. The backend takes an enum rather than a free verb string,
+	// so this list and the Rust one have to agree; a shell verb is a single
+	// click away and `ShellExecuteW` would accept anything.
+	const extraAction = (extra: DockExtra, action: "select") => {
 		closeMenu();
 		invoke("dock_extra_action", { path: extra.path, action }).catch(showActionError);
 	};
@@ -1680,12 +1680,6 @@ const Dock = memo(function Dock() {
 										onClick={() => extraAction(contextMenu.extra!, "select")}
 									>
 										Show in File Explorer
-									</div>
-									<div
-										className="menu-item"
-										onClick={() => extraAction(contextMenu.extra!, "properties")}
-									>
-										Properties
 									</div>
 								</>
 							)}
