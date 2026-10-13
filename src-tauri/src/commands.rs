@@ -55,47 +55,17 @@ pub fn setup_shelf_drop(app: AppHandle) {
     });
 }
 
-/// Small PNG preview for shelf items, as a data URI. `None` for anything that
-/// is not a readable image (the frontend falls back to a generic file icon).
+/// Preview for a shelf item: a picture, the opening text, or neither (the
+/// frontend then shows an icon for the file type). See shelf_preview.rs.
 #[tauri::command]
-pub async fn shelf_thumbnail(path: String) -> Option<String> {
-    use base64::Engine;
-
-    let p = std::path::Path::new(&path);
-    let ext = p.extension()?.to_str()?.to_ascii_lowercase();
-    if !matches!(
-        ext.as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "tif" | "tiff"
-    ) {
-        return None;
-    }
-    let meta = std::fs::metadata(p).ok()?;
-    if !meta.is_file() || meta.len() > 32 * 1024 * 1024 {
-        return None;
-    }
-
-    // Decode with dimension/allocation caps: a small, highly compressed file
-    // can still expand into a huge bitmap.
-    let mut limits = image::Limits::default();
-    limits.max_image_width = Some(8192);
-    limits.max_image_height = Some(8192);
-    limits.max_alloc = Some(256 * 1024 * 1024);
-    let mut reader = image::ImageReader::open(p)
-        .ok()?
-        .with_guessed_format()
-        .ok()?;
-    reader.limits(limits);
-    let img = reader.decode().ok()?;
-    let thumb = img.thumbnail(256, 256);
-    let mut png_bytes: Vec<u8> = Vec::new();
-    thumb
-        .write_to(
-            &mut std::io::Cursor::new(&mut png_bytes),
-            image::ImageFormat::Png,
-        )
-        .ok()?;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-    Some(format!("data:image/png;base64,{}", b64))
+pub async fn shelf_thumbnail(path: String) -> crate::shelf_preview::ShelfPreview {
+    tauri::async_runtime::spawn_blocking(move || crate::shelf_preview::preview(&path))
+        .await
+        .unwrap_or(crate::shelf_preview::ShelfPreview {
+            thumb: None,
+            text: None,
+            folder: false,
+        })
 }
 
 /// Opens a shelf file in its default app. Uses the opener plugin's Rust API
@@ -3259,78 +3229,23 @@ pub fn get_brightness() -> u32 {
     crate::state::CURRENT_BRIGHTNESS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-// ── Wi-Fi status — WLAN API for association state ────────────────────────────
-// The radio state only says Wi-Fi is on, not whether it is connected, so the
-// notch quick settings needs a second bit to distinguish "on" from "connected".
-
-fn is_wlan_connected_sync() -> bool {
-    use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::NetworkManagement::WiFi::{
-        wlan_intf_opcode_current_connection, WlanCloseHandle, WlanEnumInterfaces, WlanFreeMemory,
-        WlanOpenHandle, WlanQueryInterface, WLAN_INTERFACE_INFO_LIST,
-    };
-
-    unsafe {
-        let mut negotiated_version = 0u32;
-        let mut client_handle = HANDLE::default();
-        if WlanOpenHandle(2, None, &mut negotiated_version, &mut client_handle) != 0 {
-            return false;
-        }
-
-        let mut interface_list: *mut WLAN_INTERFACE_INFO_LIST = std::ptr::null_mut();
-        let mut connected = false;
-        if WlanEnumInterfaces(client_handle, None, &mut interface_list) != 0 {
-            WlanCloseHandle(client_handle, None);
-            return false;
-        }
-        // A success code guarantees an allocated list; as_ref() turns the
-        // pointer into a checked reference. WLAN_INTERFACE_INFO_LIST ends in a
-        // C flexible array (InterfaceInfo[1] with dwNumberOfItems entries), so
-        // the count is sanity-bounded before building the slice.
-        if let Some(list) = interface_list.as_ref() {
-            let count = list.dwNumberOfItems as usize;
-            if count > 0 && count <= 64 {
-                let interfaces = std::slice::from_raw_parts(list.InterfaceInfo.as_ptr(), count);
-                for interface in interfaces {
-                    let mut data_size = 0u32;
-                    let mut data: *mut std::ffi::c_void = std::ptr::null_mut();
-                    // Returns ERROR_INVALID_STATE when the interface is not
-                    // associated, so a successful query means an active connection.
-                    let result = WlanQueryInterface(
-                        client_handle,
-                        &interface.InterfaceGuid,
-                        wlan_intf_opcode_current_connection,
-                        None,
-                        &mut data_size,
-                        &mut data,
-                        None,
-                    );
-                    if !data.is_null() {
-                        WlanFreeMemory(data);
-                    }
-                    if result == 0 {
-                        connected = true;
-                        break;
-                    }
-                }
-            }
-            WlanFreeMemory(interface_list as *const _);
-        }
-
-        WlanCloseHandle(client_handle, None);
-        connected
-    }
-}
-
 /// Wi-Fi radio and association state, so the notch quick settings tile can show
-/// Off / On / Connected. `connected` is false while the radio is on but no
-/// network is associated.
+/// Off / On / the connected network. The radio state alone only says Wi-Fi is
+/// on, so the WLAN API supplies the association.
 #[tauri::command]
 pub async fn get_wifi_status() -> Result<WifiStatus, String> {
     tauri::async_runtime::spawn_blocking(|| -> Result<WifiStatus, String> {
         let enabled = get_radio_state_sync(windows::Devices::Radios::RadioKind::WiFi)?;
-        let connected = enabled && is_wlan_connected_sync();
-        Ok(WifiStatus { enabled, connected })
+        let ssid = if enabled {
+            crate::wifi::connected_ssid()
+        } else {
+            None
+        };
+        Ok(WifiStatus {
+            enabled,
+            connected: ssid.is_some(),
+            ssid,
+        })
     })
     .await
     .map_err(|e| e.to_string())?

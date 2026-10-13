@@ -11,6 +11,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { MixerIcon, SpeakerIcon } from "./icons";
 import { AudioMixer } from "./components/AudioMixer";
 import "./Overlay.css";
+import { EdgeSurface } from "./components/EdgeSurface";
 import { initTheme } from "./theme";
 
 // ─── Volume Notch ───────────────────────────────────────────────────────────
@@ -134,7 +135,7 @@ function VolumeNotch({
 			}
 			transition={{ type: "spring", stiffness: 450, damping: 25, mass: 0.7 }}
 		>
-			<div className="volume-notch-surface" />
+			<EdgeSurface edge="left" />
 			<motion.div
 				ref={shellRef}
 				className="volume-notch"
@@ -198,8 +199,8 @@ function VolumeNotch({
 							}}
 						>
 							<div className="volume-mixer-slot">
-							<AudioMixer active={mixerExpanded} onWidthChange={setMixerWidth} />
-						</div>
+								<AudioMixer active={mixerExpanded} onWidthChange={setMixerWidth} />
+							</div>
 						</motion.div>
 					)}
 				</AnimatePresence>
@@ -280,6 +281,7 @@ function BrightnessNotch({
 			transition={{ type: "spring", stiffness: 450, damping: 25, mass: 0.7 }}
 		>
 			<div className="brightness-notch">
+				<EdgeSurface edge="right" />
 				<motion.div
 					className="brightness-notch-content-group"
 					initial={{ opacity: 0, x: 10 }}

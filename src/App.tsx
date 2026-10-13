@@ -1,12 +1,11 @@
 import { motion, AnimatePresence, useAnimation } from "framer-motion";
-import { useEffect, useState, useCallback, useRef, memo } from "react";
+import { useEffect, useLayoutEffect, useState, useCallback, useRef, memo } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getVersion } from "@tauri-apps/api/app";
 import type { UpdateCheckResult } from "./updater";
 import "./App.css";
-import "./edge-surface.css";
 import { initTheme } from "./theme";
 import {
 	PlayIcon,
@@ -32,6 +31,10 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import type { WidgetConfig } from "./components/StatusWidgetConfig";
+import { EdgeSurface } from "./components/EdgeSurface";
+import { ShelfTypeIcon } from "./components/ShelfTypeIcon";
+import { WifiPanel } from "./components/WifiPanel";
+import { BluetoothPanel } from "./components/BluetoothPanel";
 import {
 	Cpu,
 	MemoryStick,
@@ -42,7 +45,6 @@ import {
 	Pause,
 	RotateCcw,
 	Megaphone,
-	File,
 	Type,
 	X,
 	ChevronLeft,
@@ -405,6 +407,16 @@ interface MediaInfo {
 interface WifiStatus {
 	enabled: boolean;
 	connected: boolean;
+	ssid: string | null;
+}
+
+// A shelf file's preview from the backend: a picture when one can be made,
+// else the opening text of a document or text file, and whether it's a folder
+// (for the placeholder icon).
+interface ShelfPreview {
+	thumb: string | null;
+	text: string | null;
+	folder: boolean;
 }
 
 interface ShelfItem {
@@ -428,7 +440,15 @@ interface MonitorBrightness {
 	brightness: number;
 }
 
-type BloomMode = "music" | "calendar" | "command-center" | "announcement" | "status" | "shelf";
+type BloomMode =
+	| "music"
+	| "calendar"
+	| "command-center"
+	| "announcement"
+	| "status"
+	| "shelf"
+	| "wifi"
+	| "bluetooth";
 
 // The shelf is a short-lived stash: one row, newest first, oldest evicted.
 const SHELF_MAX_ITEMS = 10;
@@ -588,6 +608,8 @@ function App() {
 	const wifiEnabled = wifiStatus?.enabled ?? false;
 	const wifiConnected = wifiStatus?.connected ?? false;
 	const [bluetoothEnabled, setBluetoothEnabled] = useState(true);
+	// Names of connected Bluetooth devices, for the controls tile.
+	const [btConnectedNames, setBtConnectedNames] = useState<string[]>([]);
 	const [batterySaverEnabled, setBatterySaverEnabled] = useState(false);
 	const [currentBrightness, setCurrentBrightness] = useState(50);
 	// Per-display brightness, as the backend describes it. `monitors` is empty on
@@ -1252,10 +1274,12 @@ function App() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
-	// Thumbnails are generated lazily per path and cached; null means "no
-	// preview" (non-image or unreadable) and falls back to a file icon. Text
-	// items render their content instead.
-	const [shelfThumbs, setShelfThumbs] = useState<Record<string, string | null>>({});
+	// Previews are generated lazily per path and cached. Images, PDFs, Office
+	// files with a saved thumbnail, and anything Windows can thumbnail (videos,
+	// folders...) show a picture; documents and text files show their opening
+	// text; the rest fall back to an icon for their type. Text items render
+	// their content.
+	const [shelfThumbs, setShelfThumbs] = useState<Record<string, ShelfPreview>>({});
 	const shelfThumbPending = useRef<Set<string>>(new Set());
 	useEffect(() => {
 		for (const item of shelfItems) {
@@ -1265,14 +1289,14 @@ function App() {
 			shelfThumbPending.current.add(path);
 			// The item may be removed while this is in flight; don't resurrect
 			// a stale cache entry.
-			const storeThumb = (thumb: string | null) =>
+			const storeThumb = (preview: ShelfPreview) =>
 				setShelfThumbs((prev) => {
 					if (!shelfItemsRef.current.some((i) => i.path === path)) return prev;
-					return { ...prev, [path]: thumb };
+					return { ...prev, [path]: preview };
 				});
-			invoke<string | null>("shelf_thumbnail", { path })
+			invoke<ShelfPreview>("shelf_thumbnail", { path })
 				.then(storeThumb)
-				.catch(() => storeThumb(null))
+				.catch(() => storeThumb({ thumb: null, text: null, folder: false }))
 				.finally(() => shelfThumbPending.current.delete(path));
 		}
 	}, [shelfItems, shelfThumbs]);
@@ -1284,7 +1308,7 @@ function App() {
 		setShelfThumbs((prev) => {
 			const keys = Object.keys(prev);
 			if (keys.every((k) => current.has(k))) return prev;
-			const next: Record<string, string | null> = {};
+			const next: Record<string, ShelfPreview> = {};
 			for (const k of keys) {
 				if (current.has(k)) next[k] = prev[k];
 			}
@@ -1330,7 +1354,7 @@ function App() {
 		if (Math.hypot(e.clientX - st.x, e.clientY - st.y) < 6) return;
 		if (!item.path) return;
 		const path = item.path;
-		const icon = shelfThumbs[path] ?? shelfDragIcon;
+		const icon = shelfThumbs[path]?.thumb ?? shelfDragIcon;
 		if (!icon) return;
 		st.dragging = true;
 		// Picking an item up is a deliberate act; don't let the post-drop
@@ -1368,12 +1392,29 @@ function App() {
 	// Wheel scrolling for the shelf strip: ease towards a target instead of
 	// jumping, so wheel and trackpad input both feel fluid.
 	const shelfScrollTargetRef = useRef<number | null>(null);
+	const shelfGridRef = useRef<HTMLDivElement>(null);
+	// Whether the shelf row overflows, so it gets room for its scrollbar.
+	const [shelfOverflowing, setShelfOverflowing] = useState(false);
+	// Measured against the open shelf's width (380px minus its 14px side
+	// padding) rather than the live one, which is still growing while the
+	// notch animates open. A removed tile stays in the row until its exit
+	// animation ends, so the row is measured again then.
+	const measureShelfOverflow = useCallback(() => {
+		const el = shelfGridRef.current;
+		setShelfOverflowing(!!el && el.scrollWidth > 380 - 28 + 1);
+	}, []);
+	useLayoutEffect(measureShelfOverflow, [shelfItems, bloomMode, measureShelfOverflow]);
 	const shelfScrollRafRef = useRef<number | null>(null);
+	// The wheel scrolls the row from anywhere over the shelf view, not just
+	// over the tiles. Mice that report lines instead of pixels are scaled up.
 	const handleShelfWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-		const el = e.currentTarget;
+		const el = shelfGridRef.current;
+		if (!el) return;
 		const max = el.scrollWidth - el.clientWidth;
+		if (max <= 0) return;
+		const unit = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? el.clientWidth : 1;
 		const base = shelfScrollTargetRef.current ?? el.scrollLeft;
-		shelfScrollTargetRef.current = Math.max(0, Math.min(max, base + e.deltaY + e.deltaX));
+		shelfScrollTargetRef.current = Math.max(0, Math.min(max, base + (e.deltaY + e.deltaX) * unit));
 		if (shelfScrollRafRef.current !== null) return;
 		const step = () => {
 			const target = shelfScrollTargetRef.current;
@@ -1388,7 +1429,16 @@ function App() {
 				shelfScrollRafRef.current = null;
 				return;
 			}
+			const before = el.scrollLeft;
 			el.scrollLeft += diff * 0.22;
+			// At fractional display scales a small step can round back to the
+			// same position; finish the move instead of stalling short of it.
+			if (el.scrollLeft === before) {
+				el.scrollLeft = target;
+				shelfScrollTargetRef.current = null;
+				shelfScrollRafRef.current = null;
+				return;
+			}
 			shelfScrollRafRef.current = requestAnimationFrame(step);
 		};
 		shelfScrollRafRef.current = requestAnimationFrame(step);
@@ -1403,11 +1453,19 @@ function App() {
 	const restingModeRef = useRef<BloomMode>("status");
 	const bloomModeRef = useRef<BloomMode>("status");
 	const rememberPanelRef = useRef<(panel: NotchPanel) => void>(() => {});
+	const notchPinnedRef = useRef(false);
+	const releaseDeferredRef = useRef(false);
 
 	// Shared hover-release, called on DOM hover end and when the backend
 	// reports the pointer left the (now click-through) notch window. Closes an
 	// open notch, remembering its panel, and returns to the resting mode.
 	const releaseNotchHover = () => {
+		// A view being typed into (a Wi-Fi password) keeps the notch open; the
+		// release happens once it lets go, if the pointer is still away.
+		if (notchPinnedRef.current) {
+			releaseDeferredRef.current = true;
+			return;
+		}
 		setIsHovered(false);
 		setIsNotchHovered(false);
 		if (isOpenRef.current) {
@@ -1420,7 +1478,9 @@ function App() {
 			prev === "command-center" ||
 			prev === "calendar" ||
 			prev === "status" ||
-			prev === "shelf"
+			prev === "shelf" ||
+			prev === "wifi" ||
+			prev === "bluetooth"
 				? restingModeRef.current
 				: prev
 		);
@@ -1656,7 +1716,8 @@ function App() {
 		if (
 			target.closest(".calendar-grid") ||
 			target.closest(".timer-column") ||
-			target.closest(".shelf-items-grid")
+			target.closest(".shelf-content") ||
+			target.closest(".qp-list")
 		) {
 			return;
 		}
@@ -1903,6 +1964,17 @@ function App() {
 	};
 	rememberPanelRef.current = rememberPanel;
 
+	// Called by views that take typed input; see releaseNotchHover.
+	const setNotchPinned = useCallback((pinned: boolean) => {
+		notchPinnedRef.current = pinned;
+		if (!pinned && releaseDeferredRef.current) {
+			releaseDeferredRef.current = false;
+			releaseNotchHover();
+		}
+		// releaseNotchHover only touches refs and state setters.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+
 	// In peek mode, briefly show the notch when a new track starts or playback
 	// resumes. The notch itself never switches views for media; the collapsed
 	// pill follows the live-activity rule below.
@@ -2008,7 +2080,7 @@ function App() {
 
 	// Wi-Fi is a three-state control: Off, on-but-not-connected, Connected.
 	// The radio state alone can't tell those apart, so get_wifi_status returns
-	// both flags. Returns false so the startup loader knows to retry.
+	// both flags, plus the connected network's name. Returns false so the startup loader knows to retry.
 	const refreshWifiStatus = useCallback(async (): Promise<boolean> => {
 		try {
 			setWifiStatus(await invoke<WifiStatus>("get_wifi_status"));
@@ -2034,6 +2106,45 @@ function App() {
 		return () => {
 			cancelled = true;
 			if (retryTimer) clearTimeout(retryTimer);
+		};
+	}, [refreshWifiStatus]);
+
+	// Connected Bluetooth devices for the tile, refreshed whenever the backend
+	// reports a device connecting, disconnecting, pairing or being removed.
+	useEffect(() => {
+		if (!bluetoothEnabled) {
+			setBtConnectedNames([]);
+			return;
+		}
+		const refresh = () =>
+			invoke<{ name: string; connected: boolean }[]>("bluetooth_list_devices")
+				.then((devices) =>
+					setBtConnectedNames(devices.filter((d) => d.connected).map((d) => d.name))
+				)
+				.catch(() => {});
+		let debounce: ReturnType<typeof setTimeout> | undefined;
+		void refresh();
+		const unlisten = listen("bluetooth-changed", () => {
+			clearTimeout(debounce);
+			debounce = setTimeout(() => void refresh(), 400);
+		});
+		return () => {
+			clearTimeout(debounce);
+			unlisten.then((f) => f());
+		};
+	}, [bluetoothEnabled]);
+
+	// The backend reports connection changes and finished scans as they
+	// happen, so the pill follows without waiting for the next poll.
+	useEffect(() => {
+		let debounce: ReturnType<typeof setTimeout> | undefined;
+		const unlisten = listen("wifi-changed", () => {
+			clearTimeout(debounce);
+			debounce = setTimeout(() => void refreshWifiStatus(), 300);
+		});
+		return () => {
+			clearTimeout(debounce);
+			unlisten.then((f) => f());
 		};
 	}, [refreshWifiStatus]);
 
@@ -2219,22 +2330,14 @@ function App() {
 		[sendVolume]
 	);
 
-	// Open WiFi settings
-	const openWifiSettings = useCallback(async () => {
-		try {
-			await invoke("open_wifi_settings");
-		} catch (e) {
-			console.error("Failed to open WiFi settings:", e);
-		}
-	}, []);
-
 	// WiFi toggle
 	const toggleWifi = useCallback(async () => {
 		const previous = wifiStatus;
 		const newState = !(previous?.enabled ?? false);
 		setWifiStatus({
 			enabled: newState,
-			connected: newState ? (previous?.connected ?? false) : false
+			connected: newState ? (previous?.connected ?? false) : false,
+			ssid: newState ? (previous?.ssid ?? null) : null
 		});
 		try {
 			await invoke("set_wifi_state", { enabled: newState });
@@ -2361,14 +2464,12 @@ function App() {
 		}
 	}, []);
 
-	const handleWifiRightClick = useCallback(
-		(e: React.MouseEvent) => {
-			e.preventDefault();
-			e.stopPropagation();
-			openWifiSettings();
-		},
-		[openWifiSettings]
-	);
+	// Right-click opens the tile's own view, the same as its › button.
+	const handleWifiRightClick = useCallback((e: React.MouseEvent) => {
+		e.preventDefault();
+		e.stopPropagation();
+		setBloomMode("wifi");
+	}, []);
 
 	const toggleDockModeSetting = useCallback(
 		async (e: React.MouseEvent) => {
@@ -2405,7 +2506,7 @@ function App() {
 	const handleBluetoothRightClick = useCallback((e: React.MouseEvent) => {
 		e.preventDefault();
 		e.stopPropagation();
-		invoke("open_bluetooth_settings");
+		setBloomMode("bluetooth");
 	}, []);
 
 	const toggleCalendarMode = (e: React.MouseEvent) => {
@@ -2501,6 +2602,7 @@ function App() {
 		if (isCalendarMode) return 480;
 		if (bloomMode === "shelf") return 380;
 		if (bloomMode === "command-center" && isOpen) return 350;
+		if (bloomMode === "wifi" || bloomMode === "bluetooth") return 350;
 		if (bloomMode === "status" && isHovered) {
 			const totalWidgets = statusWidgets.left.length + statusWidgets.right.length;
 			return Math.min(200 + totalWidgets * 50, 380);
@@ -2529,8 +2631,12 @@ function App() {
 		// Sized to the calendar's week-row count plus the timer's fixed content.
 		if (bloomMode === "calendar") return calendarMonthRows >= 6 ? 305 : 273;
 		// Shelf expands on mode alone (no hover needed: there is no cursor
-		// hover during an OS drag) and is sized to exactly one row of tiles.
-		if (bloomMode === "shelf") return shelfItems.length > 0 ? 176 : 130;
+		// hover during an OS drag) and is sized to exactly one row of tiles,
+		// plus room for the scrollbar once the tiles overflow it.
+		if (bloomMode === "shelf") {
+			if (shelfItems.length === 0) return 130;
+			return shelfOverflowing ? 190 : 176;
+		}
 		// The per-app mixer is docked below the slider rows and the panel is a
 		// fixed-height column, so the window has to grow with it or the list
 		// overflows. 120 covers the 112px dock plus the 8px flex gap above it.
@@ -2541,20 +2647,22 @@ function App() {
 		// mixer offset is folded onto it rather than keeping the old variable.
 		if (bloomMode === "command-center") {
 			// 26px per display is the full cost of adding one, not just the row.
-			// A row is 18px and the list puts an 8px gap between rows, so N rows are
-			// 18 + 26*(N-1) -- and the list is itself a child of .cc-classic-sliders-area,
-			// whose 8px gap adds one more. Total 26*N.
+			// A row is 18px and the list puts an 8px gap between rows, so N rows
+			// are 18 + 26*(N-1) -- and the list is itself a child of
+			// .cc-classic-sliders-area, whose 8px gap adds one more. Total 26*N.
 			//
-			// Getting this wrong is not cosmetic. The panel and its content must grow by
-			// the same amount every frame, or `.command-center-content-minimal`
-			// (`justify-content: space-between`) redistributes the slack and the Focus /
-			// energy saver row slides. Under-reserving by 8 moves that row 4px up.
+			// Getting this wrong is not cosmetic. The panel and its content must
+			// grow by the same amount every frame, or
+			// `.command-center-content-minimal` (`justify-content: space-between`)
+			// redistributes the slack and the Focus / energy saver row slides.
+			// Under-reserving by 8 moves that row 4px up.
 			const monitorRowsPx =
 				showMonitorBreakdown && brightnessState.perDisplay && brightnessState.monitors.length > 1
 					? brightnessState.monitors.length * 26
 					: 0;
 			return (isOpen ? 230 : 36) + (appMixerOpen ? 120 : 0) + monitorRowsPx;
 		}
+		if (bloomMode === "wifi" || bloomMode === "bluetooth") return 300;
 		if (bloomMode === "status") return 36;
 		if (isMusicMode && isOpen) {
 			const hasProgressBar = (mediaInfo.duration_ms ?? 0) > 0;
@@ -2684,6 +2792,7 @@ function App() {
 						if (!isOpen) openNotch(openingPanel());
 					}}
 					onHoverStart={() => {
+						releaseDeferredRef.current = false;
 						setIsHovered(true);
 						// Hovering the shelf cancels its post-drop auto-close.
 						if (bloomMode === "shelf") clearShelfCollapse();
@@ -2702,7 +2811,7 @@ function App() {
 						default: { type: "spring", stiffness: 500, damping: 30, mass: 1 }
 					}}
 				>
-					<div className={`edge-surface edge-surface--top ${isImpacted ? "show-flares" : ""}`} />
+					<EdgeSurface edge="top" flares={isImpacted} />
 					<AnimatePresence>
 						{isMusicMode && settingsAmbienceEnabled && albumArtUrl && isOpen && !isCalendarMode && (
 							<motion.div
@@ -3267,6 +3376,46 @@ function App() {
 									)}
 								</AnimatePresence>
 
+								{/* Wi-Fi networks, opened from the controls panel's Wi-Fi tile */}
+								<AnimatePresence>
+									{bloomMode === "wifi" && (
+										<motion.div
+											key="wifi-view"
+											initial={{ opacity: 0 }}
+											animate={{ opacity: 1 }}
+											exit={{ opacity: 0, filter: "blur(4px)", transition: { duration: 0.1 } }}
+											transition={{ type: "spring", stiffness: 400, damping: 30 }}
+										>
+											<WifiPanel
+												enabled={wifiEnabled}
+												onToggle={toggleWifi}
+												onBack={() => setBloomMode("command-center")}
+												onPinChange={setNotchPinned}
+											/>
+										</motion.div>
+									)}
+								</AnimatePresence>
+
+								{/* Bluetooth devices, opened from the controls panel's Bluetooth tile */}
+								<AnimatePresence>
+									{bloomMode === "bluetooth" && (
+										<motion.div
+											key="bluetooth-view"
+											initial={{ opacity: 0 }}
+											animate={{ opacity: 1 }}
+											exit={{ opacity: 0, filter: "blur(4px)", transition: { duration: 0.1 } }}
+											transition={{ type: "spring", stiffness: 400, damping: 30 }}
+										>
+											<BluetoothPanel
+												enabled={bluetoothEnabled}
+												onToggle={toggleBluetooth}
+												onBack={() => setBloomMode("command-center")}
+												onPinChange={setNotchPinned}
+											/>
+										</motion.div>
+									)}
+								</AnimatePresence>
+
 								{/* Command Center Panel */}
 								<AnimatePresence>
 									{bloomMode === "command-center" && (
@@ -3288,7 +3437,7 @@ function App() {
 														toggleWifi();
 													}}
 													onContextMenu={handleWifiRightClick}
-													title="Left-click to toggle, Right-click for Settings"
+													title="Left-click to toggle, Right-click for networks"
 												>
 													<div className="cc-pill-icon-wrapper">
 														<WifiIcon enabled={wifiEnabled} connected={wifiConnected} />
@@ -3301,10 +3450,21 @@ function App() {
 																: !wifiEnabled
 																	? "Off"
 																	: wifiConnected
-																		? "Connected"
+																		? (wifiStatus?.ssid ?? "Connected")
 																		: "Not connected"}
 														</span>
 													</div>
+													<button
+														className="cc-pill-more"
+														aria-label="Wi-Fi networks"
+														title="Wi-Fi networks"
+														onClick={(e) => {
+															e.stopPropagation();
+															setBloomMode("wifi");
+														}}
+													>
+														<ChevronRight />
+													</button>
 												</div>
 
 												{/* Dock Mode Pill */}
@@ -3336,7 +3496,7 @@ function App() {
 														toggleBluetooth();
 													}}
 													onContextMenu={handleBluetoothRightClick}
-													title="Left-click to toggle, Right-click for Settings"
+													title="Left-click to toggle, Right-click for devices"
 												>
 													<div className="cc-pill-icon-wrapper">
 														<BluetoothIcon />
@@ -3344,9 +3504,26 @@ function App() {
 													<div className="cc-pill-info">
 														<span className="cc-pill-title">Bluetooth</span>
 														<span className="cc-pill-status">
-															{bluetoothEnabled ? "On" : "Off"}
+															{!bluetoothEnabled
+																? "Off"
+																: btConnectedNames.length === 1
+																	? btConnectedNames[0]
+																	: btConnectedNames.length > 1
+																		? `${btConnectedNames.length} connected`
+																		: "On"}
 														</span>
 													</div>
+													<button
+														className="cc-pill-more"
+														aria-label="Bluetooth devices"
+														title="Bluetooth devices"
+														onClick={(e) => {
+															e.stopPropagation();
+															setBloomMode("bluetooth");
+														}}
+													>
+														<ChevronRight />
+													</button>
 												</div>
 
 												{/* Notch Mode Pill */}
@@ -3750,6 +3927,7 @@ function App() {
 										<motion.div
 											className="shelf-content"
 											onClick={(e) => e.stopPropagation()}
+											onWheel={handleShelfWheel}
 											initial={{ opacity: 0 }}
 											animate={{ opacity: 1 }}
 											exit={{ opacity: 0, filter: "blur(4px)", transition: { duration: 0.1 } }}
@@ -3761,10 +3939,14 @@ function App() {
 													<span>Drop files or selected text here</span>
 												</div>
 											) : (
-												<div className="shelf-items-grid" onWheel={handleShelfWheel}>
-													<AnimatePresence mode="popLayout">
+												<div
+													className={`shelf-items-grid ${shelfOverflowing ? "overflowing" : ""}`}
+													ref={shelfGridRef}
+												>
+													<AnimatePresence mode="popLayout" onExitComplete={measureShelfOverflow}>
 														{shelfItems.map((item) => {
-															const thumb = item.path ? shelfThumbs[item.path] : undefined;
+															const preview = item.path ? shelfThumbs[item.path] : undefined;
+															const thumb = preview?.thumb;
 															return (
 																<motion.div
 																	key={item.id}
@@ -3786,7 +3968,7 @@ function App() {
 																		damping: 38,
 																		mass: 0.7
 																	}}
-																	className={`shelf-tile ${item.type === "text" ? "is-text" : ""}`}
+																	className={`shelf-tile ${item.type === "text" || (!thumb && preview?.text) ? "is-text" : ""}`}
 																	title={
 																		item.type === "text" ? item.text?.slice(0, 1000) : item.path
 																	}
@@ -3804,11 +3986,26 @@ function App() {
 																				/>
 																				<span className="shelf-tile-text-body">{item.text}</span>
 																			</div>
+																		) : !thumb && preview?.text ? (
+																			// A document or text file: its opening text,
+																			// marked with its type's icon.
+																			<div className="shelf-tile-text">
+																				<ShelfTypeIcon
+																					name={item.name}
+																					folder={false}
+																					size={11}
+																					className="shelf-tile-text-icon"
+																				/>
+																				<span className="shelf-tile-text-body">{preview.text}</span>
+																			</div>
 																		) : (
 																			<>
 																				<div className="shelf-tile-placeholder">
-																					{thumb === null ? (
-																						<File size={26} strokeWidth={1.75} />
+																					{preview && !thumb ? (
+																						<ShelfTypeIcon
+																							name={item.name}
+																							folder={preview.folder}
+																						/>
 																					) : null}
 																				</div>
 																				{thumb ? (
@@ -3852,7 +4049,7 @@ function App() {
 							key="shelf-bubble"
 							ref={shelfBubbleRef}
 							type="button"
-							className="activity-bubble shelf-bubble"
+							className={`activity-bubble shelf-bubble ${isHovered ? "expanded" : ""}`}
 							aria-label={`Open shelf: ${shelfItems.length} item${shelfItems.length === 1 ? "" : "s"}`}
 							// Anchored at the pill's centre, offset past its left edge.
 							style={{ right: "50%" }}
@@ -3894,7 +4091,7 @@ function App() {
 							key="music-bubble"
 							ref={musicBubbleRef}
 							type="button"
-							className="activity-bubble"
+							className={`activity-bubble ${isHovered ? "expanded" : ""}`}
 							aria-label={mediaInfo.title ? `Open music: ${mediaInfo.title}` : "Open music"}
 							// Anchored at the pill's centre, offset past its right edge.
 							style={{ left: "50%" }}

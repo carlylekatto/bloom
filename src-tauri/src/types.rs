@@ -80,6 +80,8 @@ pub struct VolumeChangeEvent {
 pub struct WifiStatus {
     pub enabled: bool,
     pub connected: bool,
+    /// The connected network's name, for the controls tile.
+    pub ssid: Option<String>,
 }
 
 #[derive(Clone, Serialize)]

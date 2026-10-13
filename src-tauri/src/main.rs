@@ -1,16 +1,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bluetooth;
 mod commands;
 mod diagnostics;
 mod dock_extras;
 mod ddc_ci;
 mod services;
 mod shelf;
+mod shelf_preview;
 mod state;
 mod tray;
 mod types;
 mod updater;
 mod utils;
+mod wifi;
 
 use std::sync::atomic::Ordering;
 use tauri::Manager;
@@ -201,7 +204,19 @@ fn main() {
 diagnostics::get_diagnostics,
             dock_extras::get_dock_extras,
             dock_extras::open_dock_extra,
-            dock_extras::eject_dock_extra
+            dock_extras::eject_dock_extra,
+            wifi::wifi_list_networks,
+            wifi::wifi_scan,
+            wifi::wifi_connect,
+            wifi::wifi_disconnect,
+            wifi::wifi_forget,
+            wifi::wifi_open_settings,
+            bluetooth::bluetooth_list_devices,
+            bluetooth::bluetooth_set_connected,
+            bluetooth::bluetooth_discovery,
+            bluetooth::bluetooth_pair,
+            bluetooth::bluetooth_pairing_respond,
+            bluetooth::bluetooth_unpair
         ])
         .setup(|app| {
             init_taskbar_marker(app.handle());
@@ -343,6 +358,8 @@ diagnostics::get_diagnostics,
             setup_taskbar_hook();
             setup_audio_visualization(app.handle().clone());
             setup_settings_watcher(app.handle().clone());
+            wifi::setup_wifi_notifications(app.handle().clone());
+            bluetooth::setup_bluetooth_notifications(app.handle().clone());
 
             // Listen for second-instance signal to open settings
             if let Some(&h_event) = SINGLE_INSTANCE_EVENT_HANDLE.get() {

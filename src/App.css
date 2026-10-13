@@ -40,7 +40,7 @@ img {
 	justify-content: flex-start;
 	position: relative;
 	--notch-bg: var(--bloom-bg, rgba(0, 0, 0, 0.8));
-	/* Painted by the .edge-surface child (see edge-surface.css). */
+	/* Painted by the .edge-surface child (see components/EdgeSurface.css). */
 	--surface-bg: var(--notch-bg);
 	isolation: isolate;
 	border-radius: 0 0 18px 18px;
@@ -200,11 +200,17 @@ img {
 	border: none;
 	border-radius: 15px;
 	/* --notch-bg only exists inside the pill (.bloom), so use the theme
-	   colour it is built from to match the collapsed pill in every theme. */
+	   colours it is built from, matching the pill in every theme and fading
+	   with it while it's hovered. */
 	background: var(--bloom-bg, rgba(0, 0, 0, 0.8));
 	color: var(--bloom-text, white);
 	cursor: pointer;
 	overflow: hidden;
+	transition: background-color 0.3s ease;
+}
+
+.activity-bubble.expanded {
+	background: var(--bloom-bg-expanded, rgba(0, 0, 0, 0.92));
 }
 
 .activity-bubble img {
@@ -1495,10 +1501,36 @@ img {
 	overflow-x: auto;
 	overflow-y: hidden;
 	min-height: 0;
-	scrollbar-width: none;
+}
+
+/* A thin themed scrollbar once the row overflows, so items past the first
+   three can be reached without a wheel (and it shows that there are more).
+   Setting the standard scrollbar-width would make Chromium ignore these. */
+/* Room between the tiles and the scrollbar when the row overflows. */
+.shelf-items-grid.overflowing {
+	padding-bottom: 10px;
 }
 
 .shelf-items-grid::-webkit-scrollbar {
+	height: 5px;
+}
+
+/* Drawn from the theme's text colour so it reads in light and dark themes. */
+.shelf-items-grid::-webkit-scrollbar-track {
+	background: color-mix(in srgb, var(--bloom-text, white) 8%, transparent);
+	border-radius: 3px;
+}
+
+.shelf-items-grid::-webkit-scrollbar-thumb {
+	background: color-mix(in srgb, var(--bloom-text, white) 35%, transparent);
+	border-radius: 3px;
+}
+
+.shelf-items-grid::-webkit-scrollbar-thumb:hover {
+	background: color-mix(in srgb, var(--bloom-text, white) 55%, transparent);
+}
+
+.shelf-items-grid::-webkit-scrollbar-button {
 	display: none;
 }
 
@@ -1778,6 +1810,7 @@ img {
 .cc-pill-info {
 	display: flex;
 	flex-direction: column;
+	min-width: 0;
 	line-height: 1.15;
 }
 
@@ -1791,6 +1824,10 @@ img {
 	font-size: 7.5px;
 	color: var(--bloom-text-muted, rgba(255, 255, 255, 0.4));
 	font-weight: 500;
+	/* The connected network's name can be long. */
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 /* Active Monochrome pill states */
@@ -1810,6 +1847,41 @@ img {
 .cc-pill-tile.active .cc-pill-icon-wrapper {
 	background: var(--bloom-group-bg, rgba(0, 0, 0, 0.08));
 	color: var(--bloom-bg-expanded, #000);
+}
+
+/* Opens a tile's detail view from the controls panel. */
+.cc-pill-more {
+	margin-left: auto;
+	width: 18px;
+	height: 18px;
+	padding: 0;
+	flex: none;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: none;
+	border-radius: 6px;
+	background: transparent;
+	color: inherit;
+	opacity: 0.55;
+	cursor: pointer;
+	transition:
+		opacity 0.15s ease,
+		background 0.15s ease;
+}
+
+.cc-pill-more:hover {
+	opacity: 1;
+	background: var(--bloom-group-bg, rgba(255, 255, 255, 0.12));
+}
+
+.cc-pill-more svg {
+	width: 12px;
+	height: 12px;
+}
+
+.cc-pill-tile.active .cc-pill-more {
+	color: var(--bloom-bg-expanded, black);
 }
 
 /* Circular Actions Row */

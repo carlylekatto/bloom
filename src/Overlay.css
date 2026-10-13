@@ -103,6 +103,8 @@ body,
 	transform: translateY(-50%);
 	overflow: visible;
 	transform-origin: left center;
+	--surface-bg: var(--bloom-bg, rgba(0, 0, 0, 0.8));
+	isolation: isolate;
 }
 
 .volume-notch {
@@ -119,32 +121,11 @@ body,
 	overflow: hidden;
 }
 
-/* The card's background, painted together with the concave flares where it
-   meets the screen edge. One clipped layer instead of separate pieces: two
-   translucent shapes that only touch leave a light seam at fractional display
-   scales. Kept outside the card so its `overflow: hidden` can clip the mixer
-   while the card grows; it tracks the card's width through the wrapper. */
-.volume-notch-surface {
-	position: absolute;
-	top: -13px;
-	bottom: -13px;
-	left: 0;
-	right: 0;
-	background: var(--bloom-bg, rgba(0, 0, 0, 0.8));
-	pointer-events: none;
-	/* Traced as one vector outline: the flare from the screen edge, the 18px
-	   corners, and the bottom flare back to the edge. */
-	clip-path: shape(
-		from 0 0,
-		arc to 13px 13px of 13px,
-		line to calc(100% - 18px) 13px,
-		arc to 100% 31px of 18px cw,
-		line to 100% calc(100% - 31px),
-		arc to calc(100% - 18px) calc(100% - 13px) of 18px cw,
-		line to 13px calc(100% - 13px),
-		arc to 0 100% of 13px,
-		close
-	);
+/* The card and its flares are painted by the EdgeSurface in the wrapper
+   (see components/EdgeSurface.css), outside the card so its
+   `overflow: hidden` can clip the mixer while the card grows. */
+.volume-notch-wrapper > .edge-surface {
+	border-radius: 0 18px 18px 0;
 }
 
 .volume-notch-content-group {
@@ -286,31 +267,9 @@ body,
 	height: 196px;
 	position: relative;
 	pointer-events: auto;
+	/* Painted by its EdgeSurface child (see components/EdgeSurface.css). */
+	--surface-bg: var(--bloom-bg, rgba(0, 0, 0, 0.8));
 	isolation: isolate;
-}
-
-/* Card background and flares as one layer, mirroring .volume-notch-surface. */
-.brightness-notch::before {
-	content: "";
-	position: absolute;
-	top: -13px;
-	bottom: -13px;
-	left: 0;
-	right: 0;
-	z-index: -1;
-	background: var(--bloom-bg, rgba(0, 0, 0, 0.8));
-	pointer-events: none;
-	clip-path: shape(
-		from 100% 0,
-		arc to calc(100% - 13px) 13px of 13px cw,
-		line to 18px 13px,
-		arc to 0 31px of 18px,
-		line to 0 calc(100% - 31px),
-		arc to 18px calc(100% - 13px) of 18px,
-		line to calc(100% - 13px) calc(100% - 13px),
-		arc to 100% 100% of 13px cw,
-		close
-	);
 }
 
 .brightness-notch-content-group {

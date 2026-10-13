@@ -1,0 +1,154 @@
+/* Background of a surface attached to a screen edge (see EdgeSurface.tsx):
+   the pill plus the two concave flares that bridge it to that edge.
+
+   The pieces are painted opaque and overlapping, then the whole layer is faded
+   to the theme colour's alpha by a single mask, so no light seam or darker
+   overlap can show where they meet.
+
+   The browser rounds box backgrounds to whole device pixels but not clip
+   paths, so at fractional scales a background's edge can sit up to half a
+   pixel off a curve that should meet it. Every piece therefore paints 1px
+   beyond its box and is clipped back to its exact shape, which puts all the
+   visible edges on the same unrounded geometry. */
+.edge-surface {
+	--surface-solid: rgb(from var(--surface-bg) r g b / 1);
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	border-radius: inherit;
+	pointer-events: none;
+	-webkit-mask-image: linear-gradient(var(--surface-bg), var(--surface-bg));
+	mask-image: linear-gradient(var(--surface-bg), var(--surface-bg));
+}
+
+/* Reach over the flares, along the edge. */
+.edge-surface--top,
+.edge-surface--bottom {
+	left: -13px;
+	right: -13px;
+}
+
+.edge-surface--left,
+.edge-surface--right {
+	top: -13px;
+	bottom: -13px;
+}
+
+/* The pill, with the parent's (possibly animated) corner radii. */
+.edge-surface::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+	background: var(--surface-solid);
+	box-shadow: 0 0 0 1px var(--surface-solid);
+	/* The border box including its corner radii. */
+	clip-path: border-box;
+}
+
+.edge-surface--top::before,
+.edge-surface--bottom::before {
+	left: 13px;
+	right: 13px;
+}
+
+.edge-surface--left::before,
+.edge-surface--right::before {
+	top: 13px;
+	bottom: 13px;
+}
+
+/* Each flare is a 13px concave curve plus 1px that overlaps the pill. The
+   curve is a cubic whose handles reach past a circle's (10px instead of
+   7.2px), so it eases into the screen edge and the pill's side instead of
+   meeting them with a crease. One shape per axis, mirrored per corner. */
+.edge-surface-flare {
+	position: absolute;
+	background: var(--surface-solid);
+	box-shadow: 0 0 0 1px var(--surface-solid);
+	opacity: 0;
+	transition: opacity 0.3s ease;
+}
+
+.edge-surface.show-flares .edge-surface-flare {
+	opacity: 1;
+}
+
+/* Drawn as the top edge's left flare. */
+.edge-surface--top .edge-surface-flare,
+.edge-surface--bottom .edge-surface-flare {
+	width: 14px;
+	height: 13px;
+	clip-path: shape(
+		from 0 0,
+		curve to 13px 13px with 10px 0 / 13px 3px,
+		line to 14px 13px,
+		line to 14px 0,
+		close
+	);
+}
+
+/* Drawn as the left edge's top flare. */
+.edge-surface--left .edge-surface-flare,
+.edge-surface--right .edge-surface-flare {
+	width: 13px;
+	height: 14px;
+	clip-path: shape(
+		from 0 0,
+		curve to 13px 13px with 0 10px / 3px 13px,
+		line to 13px 14px,
+		line to 0 14px,
+		close
+	);
+}
+
+.edge-surface--top .edge-surface-flare {
+	top: 0;
+}
+
+.edge-surface--bottom .edge-surface-flare {
+	bottom: 0;
+}
+
+.edge-surface--left .edge-surface-flare {
+	left: 0;
+}
+
+.edge-surface--right .edge-surface-flare {
+	right: 0;
+}
+
+.edge-surface--top .edge-surface-flare--start,
+.edge-surface--bottom .edge-surface-flare--start {
+	left: 0;
+}
+
+.edge-surface--top .edge-surface-flare--end,
+.edge-surface--bottom .edge-surface-flare--end {
+	right: 0;
+}
+
+.edge-surface--left .edge-surface-flare--start,
+.edge-surface--right .edge-surface-flare--start {
+	top: 0;
+}
+
+.edge-surface--left .edge-surface-flare--end,
+.edge-surface--right .edge-surface-flare--end {
+	bottom: 0;
+}
+
+.edge-surface--top .edge-surface-flare--end,
+.edge-surface--right .edge-surface-flare--start {
+	transform: scaleX(-1);
+}
+
+.edge-surface--bottom .edge-surface-flare--start,
+.edge-surface--left .edge-surface-flare--end {
+	transform: scaleY(-1);
+}
+
+.edge-surface--bottom .edge-surface-flare--end,
+.edge-surface--right .edge-surface-flare--end {
+	transform: scale(-1, -1);
+}

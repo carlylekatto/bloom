@@ -204,7 +204,7 @@ body {
 	gap: 12px;
 	padding: 8px 8px;
 	border-radius: 18px 18px 0 0;
-	/* Painted by the .edge-surface child (see edge-surface.css). */
+	/* Painted by the .edge-surface child (see components/EdgeSurface.css). */
 	--surface-bg: var(--bloom-bg, rgba(0, 0, 0, 0.8));
 	isolation: isolate;
 	border: none;
