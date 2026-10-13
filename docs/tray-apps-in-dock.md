@@ -108,7 +108,7 @@ That is the actual fix. It is a larger feature, not a settings change.
 
 ## What has been done meanwhile
 
-`bloom-dock-show-tray-apps`, default `"true"`. Settings → Dock → "Tray Apps in
+`bloom-dock-show-tray-apps`, default `"false"`. Settings → Dock → "Tray Apps in
 Dock". When off, `Dock.tsx` skips the merge and shows only real windows, which
 is what the Windows taskbar does.
 
@@ -116,25 +116,20 @@ is what the Windows taskbar does.
 stays current and turning it back on shows what is running immediately rather
 than waiting for a window to open.
 
-Default is on so that no existing user sees a change. See the open question
-below about whether that is the right default.
+## Why it defaults to off
 
-## Open question
+Upstream's behaviour is on, so defaulting off is a visible divergence and any
+existing user loses their tray apps from the dock on upgrade.
 
-The setting defaults to **on**, which keeps upstream's behaviour. But the
-argument for defaulting off is stronger than the compatibility argument for on:
-with it on, the footgun is present for everyone, and the people who avoid it
-are only the ones who find the setting. Nobody goes looking for a toggle they
-do not know exists, and a misclick into a tray menu is silent.
+The footgun still wins. With it on, a tray app in the dock answers a right
+click with Windows' tray menu, whose entries include Quit, so a stray click
+quits the app. That cost lands on everyone who does not find the setting, and
+nobody goes looking for a toggle they do not know exists. Defaulting off means
+the dock does what the taskbar it replaced does, and turning it on is one click
+in Settings for anyone who wants upstream's layout.
 
-Defaults to decide:
-
-- **on** — no behaviour change for anyone already running Bloom; the footgun
-  ships to everyone who does not find the setting
-- **off** — no footgun; matches the host OS, which is the behaviour users
-  arrive with; deviates from upstream in the visible way
-
-This is a product decision, not a technical one.
+The cost is bounded: `selectDockTrayApps` keeps running either way, so
+switching it back on shows what is already running.
 
 ## Divergence from upstream
 

@@ -81,8 +81,14 @@ export function useSettings() {
 	// Upstream keeps tray apps in the dock (PR #168), so an app that closes its
 	// window to the tray stays as a background dock item. Off means the dock
 	// behaves like the Windows taskbar and hides them behind the tray instead.
+	//
+	// Defaults to off, unlike the setting it sits next to. A tray app in the
+	// dock is a trap: right click on it opens Windows' own tray menu, whose
+	// entries include Quit, so one stray click kills the app instead of
+	// showing a Bloom context menu. That risk is not worth carrying in the
+	// default for people who never asked for it.
 	const [dockShowTrayApps, setDockShowTrayApps] = useState(
-		() => localStorage.getItem("bloom-dock-show-tray-apps") !== "false"
+		() => localStorage.getItem("bloom-dock-show-tray-apps") === "true"
 	);
 	const [startIcon, setStartIcon] = useState(
 		() => localStorage.getItem("bloom-start-icon") || "default"
