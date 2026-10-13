@@ -5,8 +5,8 @@ Bản này **thêm khá nhiều thứ**, và một thứ **đổi hành vi mặc
 | | |
 |---|---|
 | **Phiên bản** | `3.9.6-1` |
-| **Dung lượng** | `16.77` MB |
-| **SHA256** | `DF1A0F8F5EA329423881102931E0D8754F691F92B5BDC416C80C116B69F7319A` |
+| **Dung lượng** | `16.73` MB |
+| **SHA256** | `6B9441DA60701EE63AAEBA5E02F8B84C07513F8C02D2DC5E5B786F64C81683C4` |
 
 ---
 
@@ -78,6 +78,18 @@ Thanh độ sáng nay nói chung cho mọi màn. Giờ có thể chỉnh riêng 
 App nào tự thu mình vào tray Windows giờ **không** hiện trong dock nữa. Đây là hành vi mặc định mới, khác bản trước.
 
 Lý do: chuột phải vào app đó sẽ mở **menu tray của Windows**, trong đó có mục *"Thoát"* — bấm nhầm là mất app. Muốn trả lại hành vi cũ: **Settings → Dock → "Tray Apps in Dock"**.
+
+### 🗑 Menu chuột phải cho dock extras
+Chuột phải vào icon Thùng rác, ổ đĩa hay thư mục trong dock, trước chỉ có "Open". Giờ thêm:
+
+| Mục | Áp dụng cho |
+|---|---|
+| **Show in File Explorer** | ổ đĩa, thư mục — mở thư mục cha và chọn sẵn món đó |
+| **Properties** | ổ đĩa, thư mục — bảng thuộc tính của Windows |
+| **Copy Path** | tất cả — copy đường dẫn vào clipboard |
+| **Empty Recycle Bin** | thùng rác — **có hỏi lại trước**, không hoàn tác được |
+
+Mục Eject vẫn có cho ổ USB và ổ đĩa, Remove from Dock vẫn có cho thư mục tự thêm.
 
 ---
 
