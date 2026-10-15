@@ -104,18 +104,17 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_drag::init())
-        // No updater plugin. It is not enough to drop `plugins.updater` from
-        // tauri.conf.json: a registered plugin reads that key at setup, gets
-        // null when the key is absent, and `tauri::generate_context!` turns
-        // that into a panic before the first window exists. Registering
-        // nothing here makes it structurally impossible to fetch a manifest,
-        // rather than relying on a config value staying empty.
+        // The updater plugin must stay registered. `app.updater()` reaches for
+        // `UpdaterState`, which only this plugin manages, so removing the
+        // registration turns every background check into
+        // `state() called before manage()` on a tokio worker.
         //
-        // `updater.rs` still compiles: `app.updater()` and
-        // `app.updater_builder()` are the plugin's extension trait, and both
-        // return `PluginNotInitialized` at runtime, which the commands already
-        // map to a string. AboutTab swallows it, so the button looks
-        // unchanged.
+        // What makes it inert is tauri.conf.json, which must keep a
+        // `plugins.updater` block and must give it no endpoints -- see
+        // AGENTS.md. `UpdaterBuilder::build()` returns
+        // `Error::EmptyEndpoints` before any request, and `check_for_updates`
+        // surfaces that as a string the frontend already swallows.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![]),
