@@ -23,6 +23,10 @@ interface NotchTabProps {
 	handleNotchEdgeDelayChange: (val: number) => void;
 	calendarEnabled: boolean;
 	toggleCalendar: () => void;
+	notchRememberPanel: boolean;
+	toggleNotchRememberPanel: () => void;
+	notchDefaultPanel: "calendar" | "command-center";
+	changeNotchDefaultPanel: (panel: "calendar" | "command-center") => void;
 	timerSoundEnabled: boolean;
 	toggleTimerSound: () => void;
 	musicModeEnabled: boolean;
@@ -64,6 +68,10 @@ export function NotchTab({
 	handleNotchEdgeDelayChange,
 	calendarEnabled,
 	toggleCalendar,
+	notchRememberPanel,
+	toggleNotchRememberPanel,
+	notchDefaultPanel,
+	changeNotchDefaultPanel,
 	timerSoundEnabled,
 	toggleTimerSound,
 	musicModeEnabled,
@@ -127,6 +135,32 @@ export function NotchTab({
 							onChange={(e) => handleNotchEdgeDelayChange(parseInt(e.target.value))}
 							className="settings-slider"
 						/>
+					</SettingRow>
+				)}
+
+				<SettingRow
+					icon={PanelTop}
+					label="Remember Last Panel"
+					desc="Reopen the panel you last used; turn off to choose a fixed default"
+				>
+					<label className="toggle-switch">
+						<input type="checkbox" checked={notchRememberPanel} onChange={toggleNotchRememberPanel} />
+						<span className="slider"></span>
+					</label>
+				</SettingRow>
+
+				{!notchRememberPanel && (
+					<SettingRow icon={PanelTop} label="Default Panel" desc="Open this panel when you click the notch">
+						<select
+							className="settings-select"
+							value={calendarEnabled ? notchDefaultPanel : "command-center"}
+							onChange={(e) =>
+								changeNotchDefaultPanel(e.target.value as "calendar" | "command-center")
+							}
+						>
+							<option value="calendar" disabled={!calendarEnabled}>Calendar</option>
+							<option value="command-center">Command Center</option>
+						</select>
 					</SettingRow>
 				)}
 

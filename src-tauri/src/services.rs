@@ -2076,6 +2076,19 @@ fn dock_region_hit(
     let over = cursor.x >= rx && cursor.x <= (rx + rw) && cursor.y >= ry && cursor.y <= (ry + rh);
     (over, Some((rx, rx + rw)))
 }
+/// Hover-intent ("pressure") gate for the bottom edge, the dock-side mirror of
+/// the top-edge gate. Contact with the bottom band only starts a dwell clock;
+/// the edge is armed — and only then reveals the dock or claims cursor input —
+/// after the cursor has rested in the band for the configured delay. A
+/// pass-through along the bottom strip never arms it. The delay is user-tunable
+/// via `bloom-dock-edge-delay` (ms); `0` restores the old instant behavior.
+const BOTTOM_EDGE_BAND_PX: f64 = 8.0;
+const BOTTOM_EDGE_DWELL_MS: i64 = 200;
+/// The mouse hook only fires on WM_MOUSEMOVE, so a pending dwell is completed
+/// by a watchdog that re-checks at this cadence.
+const BOTTOM_EDGE_POLL_MS: u64 = 40;
+static MH_DOCK_EDGE_ENTER_MS: AtomicI64 = AtomicI64::new(0);
+static MH_DOCK_EDGE_ARMED: AtomicBool = AtomicBool::new(false);
 
 /// Physical bounds `(x, y, width, height)` of the expanded per-app volume
 /// mixer (notch + panel), if it is open. The frontend reports the card in
@@ -2243,15 +2256,18 @@ fn apply_capture_ui_state(app: &AppHandle, active: bool) {
     MH_LAST_MAIN_IGNORE.store(-1, Ordering::Relaxed);
     MH_LAST_DOCK_IGNORE.store(-1, Ordering::Relaxed);
     MH_LAST_OV_IGNORE.store(-1, Ordering::Relaxed);
-    // Cancel any pending top-edge dwell so it cannot arm while Bloom is
-    // click-through for the capture tool.
+    // Cancel any pending top/bottom-edge dwell so they cannot arm while Bloom
+    // is click-through for the capture tool.
     MH_TOP_EDGE_ENTER_MS.store(0, Ordering::Relaxed);
     MH_TOP_EDGE_ARMED.store(false, Ordering::Relaxed);
+    MH_DOCK_EDGE_ENTER_MS.store(0, Ordering::Relaxed);
+    MH_DOCK_EDGE_ARMED.store(false, Ordering::Relaxed);
 }
 
 pub fn setup_mouse_hook(app_handle: AppHandle) {
     let _ = MOUSE_HOOK_APP_HANDLE.set(app_handle.clone());
     setup_volume_mixer_watchdog(app_handle.clone());
+    setup_dock_edge_watchdog(app_handle.clone());
     setup_top_edge_watchdog(app_handle);
     unsafe {
         SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), None, 0)
@@ -2543,6 +2559,247 @@ pub fn sync_dock_click_through(app: &AppHandle) {
     MH_LAST_DOCK_IGNORE.store(new_ignore, Ordering::Relaxed);
 }
 
+/// Bottom-edge hover-intent delay in milliseconds. `0` disables the gate so the
+/// dock reveals the moment the band is touched (the pre-fix behavior).
+fn dock_edge_dwell_ms(app_handle: &AppHandle) -> i64 {
+    crate::utils::get_setting_str(app_handle, "bloom-dock-edge-delay")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(BOTTOM_EDGE_DWELL_MS)
+        .clamp(0, 2000)
+}
+
+/// True once the cursor has stayed inside the bottom band long enough to count
+/// as a deliberate reveal. Mere contact does not arm: a pass along the bottom
+/// strip on the way to a maximized window's bottom controls must not reveal the
+/// dock. Leaving the band disarms and restarts the clock.
+///
+/// The mouse hook only fires on movement, so `setup_dock_edge_watchdog` also
+/// calls this while a dwell is pending so it can complete on a stationary
+/// cursor.
+fn dock_edge_armed_for(
+    app_handle: &AppHandle,
+    cursor: windows::Win32::Foundation::POINT,
+    now: i64,
+    scale: f64,
+) -> bool {
+    let (mon_x, mon_y) = MH_CACHED_MON_POS
+        .lock()
+        .ok()
+        .and_then(|g| *g)
+        .unwrap_or((0, 0));
+    let (mon_w, mon_h) = MH_CACHED_MON_SIZE
+        .lock()
+        .ok()
+        .and_then(|g| *g)
+        .map(|s| (s.0 as i32, s.1 as i32))
+        .unwrap_or((1920, 1080));
+
+    let in_band = cursor.y >= (mon_y + mon_h - (BOTTOM_EDGE_BAND_PX * scale) as i32)
+        && cursor.x >= mon_x
+        && cursor.x <= (mon_x + mon_w);
+
+    if !in_band {
+        MH_DOCK_EDGE_ENTER_MS.store(0, Ordering::Relaxed);
+        MH_DOCK_EDGE_ARMED.store(false, Ordering::Relaxed);
+        return false;
+    }
+    if MH_DOCK_EDGE_ARMED.load(Ordering::Relaxed) {
+        return true;
+    }
+    let dwell_ms = dock_edge_dwell_ms(app_handle);
+    if dwell_ms <= 0 {
+        MH_DOCK_EDGE_ARMED.store(true, Ordering::Relaxed);
+        return true;
+    }
+    let enter = MH_DOCK_EDGE_ENTER_MS.load(Ordering::Relaxed);
+    if enter == 0 {
+        MH_DOCK_EDGE_ENTER_MS.store(now, Ordering::Relaxed);
+        return false;
+    }
+    if now - enter >= dwell_ms {
+        MH_DOCK_EDGE_ARMED.store(true, Ordering::Relaxed);
+        return true;
+    }
+    false
+}
+
+/// Hover + click-through state for the dock window. Shared by the mouse hook
+/// (on movement) and the bottom-edge watchdog (to finish a stationary dwell).
+fn update_dock_interaction(
+    app_handle: &AppHandle,
+    cursor: windows::Win32::Foundation::POINT,
+    now: i64,
+    fg_fs: bool,
+) {
+    if fg_fs {
+        // Fullscreen foreground app or capture overlay: the dock must not
+        // intercept input (e.g. a Snipping Tool selection ending at the
+        // bottom edge), so keep it click-through.
+        MH_DOCK_EDGE_ENTER_MS.store(0, Ordering::Relaxed);
+        MH_DOCK_EDGE_ARMED.store(false, Ordering::Relaxed);
+        if MH_LAST_DOCK_IGNORE.load(Ordering::Relaxed) != 1 {
+            if let Some(dock_win) = app_handle.get_webview_window("dock") {
+                let _ = dock_win.set_ignore_cursor_events(true);
+            }
+            MH_LAST_DOCK_IGNORE.store(1, Ordering::Relaxed);
+        }
+        if MH_LAST_EDGE_HOVER.swap(0, Ordering::Relaxed) != 0 {
+            let _ = app_handle.emit("dock-edge-hover", false);
+        }
+        return;
+    }
+
+    let Some(dock_win) = app_handle.get_webview_window("dock") else {
+        return;
+    };
+    if !dock_win.is_visible().unwrap_or(false) {
+        return;
+    }
+
+    let (mon_x, mon_y) = MH_CACHED_MON_POS
+        .lock()
+        .ok()
+        .and_then(|g| *g)
+        .unwrap_or((0, 0));
+    let (mon_w, mon_h) = MH_CACHED_MON_SIZE
+        .lock()
+        .ok()
+        .and_then(|g| *g)
+        .map(|s| (s.0 as i32, s.1 as i32))
+        .unwrap_or((1920, 1080));
+
+    let mut is_click_interactive = false;
+    let mut is_hovered = false;
+    let mut dock_span: Option<(i32, i32)> = None;
+
+    let dock_rect_val = DOCK_WINDOW_RECT.lock().ok().and_then(|g| *g);
+
+    if let Some((win_pos, win_size)) = dock_rect_val {
+        let in_window = cursor.x >= win_pos.x
+            && cursor.x <= (win_pos.x + win_size.width as i32)
+            && cursor.y >= win_pos.y
+            && cursor.y <= (win_pos.y + win_size.height as i32);
+
+        if in_window {
+            if let Ok(region) = DOCK_RECT.try_lock() {
+                if let Some(r) = *region {
+                    let scale = dock_win.scale_factor().unwrap_or(1.0);
+                    let pad_x = (5.0 * scale) as i32;
+                    let pad_y_top = (8.0 * scale) as i32;
+                    let pad_y_bottom = (5.0 * scale) as i32;
+                    // Hysteresis keeps the dock interactive a little past
+                    // its bounds once grabbed, so removing the edge-forced
+                    // interactivity doesn't reintroduce boundary flicker.
+                    let hyst = if MH_LAST_DOCK_IGNORE.load(Ordering::Relaxed) == 0 {
+                        (10.0 * scale) as i32
+                    } else {
+                        0
+                    };
+                    let rx = win_pos.x + (r.x as f64 * scale) as i32 - pad_x - hyst;
+                    let ry = win_pos.y + (r.y as f64 * scale) as i32 - pad_y_top - hyst;
+                    let rw = (r.width as f64 * scale) as i32 + (pad_x * 2) + (hyst * 2);
+                    let rh =
+                        (r.height as f64 * scale) as i32 + pad_y_top + pad_y_bottom + (hyst * 2);
+                    if cursor.x >= rx
+                        && cursor.x <= (rx + rw)
+                        && cursor.y >= ry
+                        && cursor.y <= (ry + rh)
+                    {
+                        is_click_interactive = true;
+                    }
+                    dock_span = Some((rx, rx + rw));
+                }
+            }
+
+            if !is_click_interactive && MENU_IS_OPEN.load(Ordering::Relaxed) {
+                if let Ok(rect) = MENU_RECT.try_lock() {
+                    if let Some(r) = *rect {
+                        let scale = dock_win.scale_factor().unwrap_or(1.0);
+                        let rx =
+                            win_pos.x + (r.x as f64 * scale) as i32 - (5.0 * scale) as i32;
+                        let ry =
+                            win_pos.y + (r.y as f64 * scale) as i32 - (5.0 * scale) as i32;
+                        let rw = (r.width as f64 * scale) as i32 + (10.0 * scale) as i32;
+                        let rh = (r.height as f64 * scale) as i32 + (10.0 * scale) as i32;
+                        if cursor.x >= rx
+                            && cursor.x <= (rx + rw)
+                            && cursor.y >= ry
+                            && cursor.y <= (ry + rh)
+                        {
+                            is_click_interactive = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Hot-edge detection (Bottom edge). Only a dwelled (armed) edge, a dock
+    // hover, or a recent hover reveals the dock — a pass through the band does
+    // not.
+    let in_dock_hover = DOCK_IS_HOVERED.load(Ordering::Relaxed);
+    let scale = dock_win.scale_factor().unwrap_or(1.0);
+    let edge_armed = dock_edge_armed_for(app_handle, cursor, now, scale);
+    let at_bottom_edge = cursor.y >= (mon_y + mon_h - (BOTTOM_EDGE_BAND_PX * scale) as i32)
+        && cursor.x >= mon_x
+        && cursor.x <= (mon_x + mon_w);
+
+    if edge_armed || in_dock_hover {
+        is_hovered = true;
+        MH_DOCK_EXPIRY_MS.store(now + 500, Ordering::Relaxed);
+    }
+
+    // Approaching along the bottom edge keeps the dock interactive while near
+    // its horizontal span, so the reveal can't be clicked through mid-animation.
+    // Only an armed edge may claim the strip; the corners and a mere pass stay
+    // click-through.
+    if at_bottom_edge && edge_armed {
+        if let Some((span_left, span_right)) = dock_span {
+            let edge_pad = (60.0 * scale) as i32;
+            if cursor.x >= span_left - edge_pad && cursor.x <= span_right + edge_pad {
+                is_click_interactive = true;
+            }
+        }
+    }
+
+    let final_dock_hover = is_hovered || now < MH_DOCK_EXPIRY_MS.load(Ordering::Relaxed);
+    let prev = MH_LAST_EDGE_HOVER.load(Ordering::Relaxed);
+    let new_val = if final_dock_hover { 1 } else { 0 };
+    if prev != new_val {
+        let _ = app_handle.emit("dock-edge-hover", final_dock_hover);
+        MH_LAST_EDGE_HOVER.store(new_val, Ordering::Relaxed);
+    }
+
+    let should_ignore = !is_click_interactive && !MENU_IS_OPEN.load(Ordering::Relaxed);
+    let prev_ignore = MH_LAST_DOCK_IGNORE.load(Ordering::Relaxed);
+    let new_ignore = if should_ignore { 1 } else { 0 };
+    if prev_ignore != new_ignore {
+        if let Ok(hwnd) = dock_win.hwnd() {
+            re_assert_topmost(hwnd);
+        }
+        let _ = dock_win.set_ignore_cursor_events(should_ignore);
+        MH_LAST_DOCK_IGNORE.store(new_ignore, Ordering::Relaxed);
+    }
+}
+
+/// Keeps dock hit-testing fresh while the cursor is stationary: completes a
+/// pending bottom-edge dwell and catches boundary crossings the movement-only
+/// hook misses (so the click-through flip always happens).
+fn setup_dock_edge_watchdog(app_handle: AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(BOTTOM_EDGE_POLL_MS));
+        if CAPTURE_UI_ACTIVE.load(Ordering::Relaxed) || SHUTTING_DOWN.load(Ordering::Relaxed) {
+            continue;
+        }
+        let mut pt = windows::Win32::Foundation::POINT::default();
+        if unsafe { windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt) }.is_err() {
+            continue;
+        }
+        let fg_fs = CURRENT_FOREGROUND_FULLSCREEN.load(Ordering::Relaxed);
+        update_dock_interaction(&app_handle, pt, now_ms(), fg_fs);
+    });
+}
+
 unsafe extern "system" fn mouse_hook_proc(
     code: i32,
     wparam: WPARAM,
@@ -2614,108 +2871,7 @@ unsafe extern "system" fn mouse_hook_proc(
             let fg_fs = CURRENT_FOREGROUND_FULLSCREEN.load(Ordering::Relaxed);
 
             // --- Dock Interaction ---
-            if fg_fs {
-                // Fullscreen foreground app or capture overlay: the dock must not
-                // intercept input (e.g. a Snipping Tool selection ending at the
-                // bottom edge), so keep it click-through.
-                if MH_LAST_DOCK_IGNORE.load(Ordering::Relaxed) != 1 {
-                    if let Some(dock_win) = app_handle.get_webview_window("dock") {
-                        let _ = dock_win.set_ignore_cursor_events(true);
-                    }
-                    MH_LAST_DOCK_IGNORE.store(1, Ordering::Relaxed);
-                }
-                if MH_LAST_EDGE_HOVER.swap(0, Ordering::Relaxed) != 0 {
-                    let _ = app_handle.emit("dock-edge-hover", false);
-                }
-            } else if let Some(dock_win) = app_handle.get_webview_window("dock") {
-                if dock_win.is_visible().unwrap_or(false) {
-                    let (over_dock_region, dock_span) = dock_region_hit(&dock_win, cursor);
-
-                    let mut is_click_interactive = over_dock_region;
-                    let mut is_hovered = false;
-
-                    let dock_rect_val = DOCK_WINDOW_RECT.lock().ok().and_then(|g| *g);
-
-                    if let Some((win_pos, win_size)) = dock_rect_val {
-                        let in_window = cursor.x >= win_pos.x
-                            && cursor.x <= (win_pos.x + win_size.width as i32)
-                            && cursor.y >= win_pos.y
-                            && cursor.y <= (win_pos.y + win_size.height as i32);
-
-                        if in_window
-                            && !is_click_interactive
-                            && MENU_IS_OPEN.load(Ordering::Relaxed)
-                        {
-                            if let Ok(rect) = MENU_RECT.try_lock() {
-                                if let Some(r) = *rect {
-                                    let scale = dock_win.scale_factor().unwrap_or(1.0);
-                                    let rx = win_pos.x + (r.x as f64 * scale) as i32
-                                        - (5.0 * scale) as i32;
-                                    let ry = win_pos.y + (r.y as f64 * scale) as i32
-                                        - (5.0 * scale) as i32;
-                                    let rw =
-                                        (r.width as f64 * scale) as i32 + (10.0 * scale) as i32;
-                                    let rh =
-                                        (r.height as f64 * scale) as i32 + (10.0 * scale) as i32;
-                                    if cursor.x >= rx
-                                        && cursor.x <= (rx + rw)
-                                        && cursor.y >= ry
-                                        && cursor.y <= (ry + rh)
-                                    {
-                                        is_click_interactive = true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Hot-edge detection (Bottom edge)
-                    let in_dock_hover = DOCK_IS_HOVERED.load(Ordering::Relaxed);
-                    let scale = dock_win.scale_factor().unwrap_or(1.0);
-                    let at_bottom_edge = cursor.y >= (mon_y + mon_h - (8.0 * scale) as i32)
-                        && cursor.x >= mon_x
-                        && cursor.x <= (mon_x + mon_w);
-
-                    if at_bottom_edge || in_dock_hover {
-                        is_hovered = true;
-                        MH_DOCK_EXPIRY_MS.store(now + 500, Ordering::Relaxed);
-                    }
-
-                    // Approaching along the bottom edge keeps the dock interactive
-                    // while near its horizontal span, so the reveal can't be clicked
-                    // through mid-animation. The corners stay click-through.
-                    if at_bottom_edge {
-                        if let Some((span_left, span_right)) = dock_span {
-                            let edge_pad = (60.0 * scale) as i32;
-                            if cursor.x >= span_left - edge_pad && cursor.x <= span_right + edge_pad
-                            {
-                                is_click_interactive = true;
-                            }
-                        }
-                    }
-
-                    let final_dock_hover =
-                        is_hovered || now < MH_DOCK_EXPIRY_MS.load(Ordering::Relaxed);
-                    let prev = MH_LAST_EDGE_HOVER.load(Ordering::Relaxed);
-                    let new_val = if final_dock_hover { 1 } else { 0 };
-                    if prev != new_val {
-                        let _ = app_handle.emit("dock-edge-hover", final_dock_hover);
-                        MH_LAST_EDGE_HOVER.store(new_val, Ordering::Relaxed);
-                    }
-
-                    let should_ignore =
-                        !is_click_interactive && !MENU_IS_OPEN.load(Ordering::Relaxed);
-                    let prev_ignore = MH_LAST_DOCK_IGNORE.load(Ordering::Relaxed);
-                    let new_ignore = if should_ignore { 1 } else { 0 };
-                    if prev_ignore != new_ignore {
-                        if let Ok(hwnd) = dock_win.hwnd() {
-                            re_assert_topmost(hwnd);
-                        }
-                        let _ = dock_win.set_ignore_cursor_events(should_ignore);
-                        MH_LAST_DOCK_IGNORE.store(new_ignore, Ordering::Relaxed);
-                    }
-                }
-            }
+            update_dock_interaction(app_handle, cursor, now, fg_fs);
 
             // --- Main (TopBar) Interaction ---
             update_main_interaction(app_handle, cursor, now, fg_fs);

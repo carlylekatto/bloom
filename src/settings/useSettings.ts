@@ -32,6 +32,14 @@ export function useSettings() {
 		() => localStorage.getItem("bloom-timer-sound-enabled") !== "false"
 	);
 	const [musicModeEnabled, setMusicModeEnabled] = useState(true);
+	const [notchRememberPanel, setNotchRememberPanel] = useState(
+		() => (localStorage.getItem("bloom-notch-remember-panel") ??
+			localStorage.getItem("bloom-notch-click-to-open")) !== "false"
+	);
+	const [notchDefaultPanel, setNotchDefaultPanel] = useState<"calendar" | "command-center">(
+		() => localStorage.getItem("bloom-notch-default-panel") === "command-center"
+			? "command-center" : "calendar"
+	);
 	const [musicCompactNotch, setMusicCompactNotch] = useState(true);
 	const [shelfPersist, setShelfPersist] = useState(
 		() => localStorage.getItem("bloom-shelf-persist") === "true"
@@ -120,6 +128,10 @@ export function useSettings() {
 		const raw = localStorage.getItem("bloom-dock-mode") || "smart";
 		return raw === "auto-hide" ? "smart" : raw;
 	});
+	const [dockEdgeDelay, setDockEdgeDelay] = useState(() => {
+		const val = localStorage.getItem("bloom-dock-edge-delay");
+		return val !== null ? parseInt(val) : 200;
+	});
 	const [notchMode, setNotchMode] = useState("fixed");
 	const [notchEdgeDelay, setNotchEdgeDelay] = useState(() => {
 		const val = localStorage.getItem("bloom-notch-edge-delay");
@@ -185,6 +197,10 @@ export function useSettings() {
 			apply(getVal("bloom-calendar-enabled"), setCalendarEnabled, readBool);
 			apply(getVal("bloom-timer-sound-enabled"), setTimerSoundEnabled, readBool);
 			apply(getVal("bloom-music-mode-enabled"), setMusicModeEnabled, readBool);
+			apply(getVal("bloom-notch-remember-panel") ?? getVal("bloom-notch-click-to-open"),
+				setNotchRememberPanel, readBool);
+			apply(getVal("bloom-notch-default-panel"), setNotchDefaultPanel,
+				(v) => v === "command-center" ? "command-center" : "calendar");
 			apply(getVal("bloom-music-compact-notch"), setMusicCompactNotch, readBool);
 			apply(getVal("bloom-shelf-persist"), setShelfPersist, readBool);
 			apply(getVal("bloom-volume-overlay-enabled"), setVolumeOverlayEnabled, readBool);
@@ -218,6 +234,7 @@ export function useSettings() {
 			apply(getVal("bloom-notch-mode"), setNotchMode, (v) => (v === "auto-hide" ? "smart" : v));
 			apply(getVal("bloom-notch-edge-delay"), setNotchEdgeDelay, parseInt);
 			apply(getVal("bloom-dock-mode"), setDockMode, (v) => (v === "auto-hide" ? "smart" : v));
+			apply(getVal("bloom-dock-edge-delay"), setDockEdgeDelay, parseInt);
 
 			const savedCity = getVal("bloom-weather-city");
 			if (savedCity) setCityName(savedCity);
@@ -260,6 +277,7 @@ export function useSettings() {
 	// ── Sync settings from other windows ──
 	useSettingsSync({
 		"bloom-dock-mode": setDockMode,
+		"bloom-dock-edge-delay": setDockEdgeDelay,
 		"bloom-notch-mode": setNotchMode,
 		"bloom-notch-edge-delay": setNotchEdgeDelay,
 		"bloom-dock-enabled": setDockEnabled,
@@ -279,6 +297,9 @@ export function useSettings() {
 		"bloom-calendar-enabled": setCalendarEnabled,
 		"bloom-timer-sound-enabled": setTimerSoundEnabled,
 		"bloom-music-mode-enabled": setMusicModeEnabled,
+		"bloom-notch-remember-panel": setNotchRememberPanel,
+		"bloom-notch-default-panel": (v: unknown) =>
+			setNotchDefaultPanel(v === "command-center" ? "command-center" : "calendar"),
 		"bloom-music-compact-notch": setMusicCompactNotch,
 		"bloom-media-ambience-enabled": setMediaAmbienceEnabled,
 		"bloom-media-compact-glow-enabled": setMediaCompactGlowEnabled,
@@ -446,6 +467,17 @@ export function useSettings() {
 		const next = !musicModeEnabled;
 		setMusicModeEnabled(next);
 		saveSetting("bloom-music-mode-enabled", String(next));
+	};
+
+	const toggleNotchRememberPanel = () => {
+		const next = !notchRememberPanel;
+		setNotchRememberPanel(next);
+		saveSetting("bloom-notch-remember-panel", String(next));
+	};
+
+	const changeNotchDefaultPanel = (panel: "calendar" | "command-center") => {
+		setNotchDefaultPanel(panel);
+		saveSetting("bloom-notch-default-panel", panel);
 	};
 
 	const toggleMusicCompactNotch = () => {
@@ -634,6 +666,11 @@ export function useSettings() {
 	const setNotchModeValue = (newMode: string) => {
 		setNotchMode(newMode);
 		saveSetting("bloom-notch-mode", newMode);
+	};
+
+	const handleDockEdgeDelayChange = (val: number) => {
+		setDockEdgeDelay(val);
+		saveSetting("bloom-dock-edge-delay", val.toString());
 	};
 
 	const handleNotchEdgeDelayChange = (val: number) => {
@@ -868,6 +905,10 @@ export function useSettings() {
 		toggleTimerSound,
 		musicModeEnabled,
 		toggleMusicMode,
+		notchRememberPanel,
+		toggleNotchRememberPanel,
+		notchDefaultPanel,
+		changeNotchDefaultPanel,
 		musicCompactNotch,
 		toggleMusicCompactNotch,
 		shelfPersist,
@@ -901,6 +942,8 @@ export function useSettings() {
 		toggleDock,
 		dockMode,
 		setDockModeValue,
+		dockEdgeDelay,
+		handleDockEdgeDelayChange,
 		dockPreviewEnabled,
 		toggleDockPreview,
 		dockIconOnly,

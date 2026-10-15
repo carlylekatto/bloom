@@ -9,6 +9,7 @@ import {
 	Keyboard,
 	Sparkles,
 	RotateCcw,
+	Timer,
 	LayoutPanelLeft,
 	HardDrive,
 	Trash2,
@@ -26,7 +27,7 @@ const START_ICON_PRESETS = [
 	{ key: "bloom-colorful", src: "/bloom-colorful.png", label: "Colorful" },
 	{ key: "bloom-golden", src: "/bloom-golden.png", label: "Golden" },
 	{ key: "bloom-biscuit", src: "/bloom-biscuit.png", label: "Orange" },
-	{ key: "windows", src: "/windows.png", label: "Windows" }
+	{ key: "windows", src: "/windows-11.png", label: "Windows" }
 ];
 
 const startIconTileStyle = (active: boolean): CSSProperties => ({
@@ -49,6 +50,8 @@ interface DockTabProps {
 	toggleDock: () => void;
 	dockMode: string;
 	setDockModeValue: (mode: string) => void;
+	dockEdgeDelay: number;
+	handleDockEdgeDelayChange: (val: number) => void;
 	dockPreviewEnabled: boolean;
 	toggleDockPreview: () => void;
 	dockIconOnly: boolean;
@@ -81,6 +84,8 @@ export function DockTab({
 	toggleDock,
 	dockMode,
 	setDockModeValue,
+	dockEdgeDelay,
+	handleDockEdgeDelayChange,
 	dockPreviewEnabled,
 	toggleDockPreview,
 	dockIconOnly,
@@ -146,6 +151,28 @@ export function DockTab({
 								<option value="peek">Peek</option>
 							</select>
 						</SettingRow>
+
+						{dockMode !== "fixed" && (
+							<SettingRow
+								icon={Timer}
+								label="Peek Delay"
+								desc={
+									dockEdgeDelay === 0
+										? "Reveal instantly on bottom-edge contact"
+										: `Rest on the bottom edge for ${dockEdgeDelay}ms to reveal`
+								}
+							>
+								<input
+									type="range"
+									min="0"
+									max="800"
+									step="50"
+									value={dockEdgeDelay}
+									onChange={(e) => handleDockEdgeDelayChange(parseInt(e.target.value))}
+									className="settings-slider"
+								/>
+							</SettingRow>
+						)}
 
 						<SettingRow icon={Eye} label="Show App Previews" desc="Show window thumbnails on hover">
 							<label className="toggle-switch">
@@ -405,7 +432,7 @@ export function DockTab({
 											draggable={false}
 										/>
 									) : (
-										<span style={{ fontSize: "20px" }}>+</span>
+										<Plus size={20} strokeWidth={2} />
 									)}
 								</div>
 								{startIcon !== "default" && (
