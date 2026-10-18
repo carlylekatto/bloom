@@ -11,6 +11,7 @@ import {
 	addCustomFolder,
 	removeCustomFolder,
 	toggleEnabledFolder,
+	toggleHiddenDrive,
 	DEFAULT_ENABLED_FOLDERS
 } from "../dockExtras";
 import type { WidgetConfig } from "./types";
@@ -113,8 +114,15 @@ export function useSettings() {
 	const [dockExtrasDrives, setDockExtrasDrives] = useState(
 		() => localStorage.getItem("bloom-dock-extras-drives") !== "false"
 	);
+	const [dockExtrasHiddenDrives, setDockExtrasHiddenDrives] = useState(
+		() => localStorage.getItem("bloom-dock-extras-hidden-drives") || ""
+	);
 	const [dockExtrasRecycleBin, setDockExtrasRecycleBin] = useState(
 		() => localStorage.getItem("bloom-dock-extras-recycle-bin") !== "false"
+	);
+	// Off unless turned on, so existing docks don't change.
+	const [dockTaskView, setDockTaskView] = useState(
+		() => localStorage.getItem("bloom-dock-task-view") === "true"
 	);
 	const [dockExtrasFolders, setDockExtrasFolders] = useState(
 		() => localStorage.getItem("bloom-dock-extras-folders") ?? DEFAULT_ENABLED_FOLDERS
@@ -224,6 +232,8 @@ export function useSettings() {
 			apply(getVal("bloom-dock-extras-position"), setDockExtrasPosition, (v) => v);
 			apply(getVal("bloom-dock-extras-drives"), setDockExtrasDrives, readBool);
 			apply(getVal("bloom-dock-extras-recycle-bin"), setDockExtrasRecycleBin, readBool);
+			apply(getVal("bloom-dock-task-view"), setDockTaskView, readBool);
+			apply(getVal("bloom-dock-extras-hidden-drives"), setDockExtrasHiddenDrives, (v) => v);
 			apply(getVal("bloom-dock-extras-folders"), setDockExtrasFolders, (v) => v);
 			apply(getVal("bloom-dock-extras-custom-folders"), setDockExtrasCustomFolders, (v) => v);
 
@@ -356,6 +366,8 @@ export function useSettings() {
 		"bloom-dock-extras-position": setDockExtrasPosition,
 		"bloom-dock-extras-drives": setDockExtrasDrives,
 		"bloom-dock-extras-recycle-bin": setDockExtrasRecycleBin,
+		"bloom-dock-task-view": setDockTaskView,
+		"bloom-dock-extras-hidden-drives": setDockExtrasHiddenDrives,
 		"bloom-dock-extras-folders": setDockExtrasFolders,
 		"bloom-dock-extras-custom-folders": setDockExtrasCustomFolders,
 		"bloom-weather-enabled": setWeatherEnabled,
@@ -680,10 +692,22 @@ export function useSettings() {
 		saveSetting("bloom-dock-extras-drives", String(next));
 	};
 
+	const toggleDockExtrasDrive = (letter: string) => {
+		const next = toggleHiddenDrive(dockExtrasHiddenDrives, letter);
+		setDockExtrasHiddenDrives(next);
+		saveSetting("bloom-dock-extras-hidden-drives", next);
+	};
+
 	const toggleDockExtrasRecycleBin = () => {
 		const next = !dockExtrasRecycleBin;
 		setDockExtrasRecycleBin(next);
 		saveSetting("bloom-dock-extras-recycle-bin", String(next));
+	};
+
+	const toggleDockTaskView = () => {
+		const next = !dockTaskView;
+		setDockTaskView(next);
+		saveSetting("bloom-dock-task-view", String(next));
 	};
 
 	const toggleDockExtraFolder = (id: string) => {
@@ -1005,8 +1029,12 @@ export function useSettings() {
 		handleDockExtrasPositionChange,
 		dockExtrasDrives,
 		toggleDockExtrasDrives,
+		dockExtrasHiddenDrives,
+		toggleDockExtrasDrive,
 		dockExtrasRecycleBin,
 		toggleDockExtrasRecycleBin,
+		dockTaskView,
+		toggleDockTaskView,
 		dockExtrasFolders,
 		toggleDockExtraFolder,
 		dockExtrasCustomFolders,
