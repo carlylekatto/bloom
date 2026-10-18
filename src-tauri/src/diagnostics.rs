@@ -1,15 +1,25 @@
-//! Read-only snapshot of the machine state Bloom depends on.
+//! Two unrelated things share this file.
 //!
-//! Every field here answers a question a bug reporter cannot answer about their
-//! own PC: how many monitors, where, at what scale; whether Explorer still owns
-//! the tray windows Bloom looks up by class; whether a crash marker survived.
+//! - The runtime log is upstream #231's bounded event log. It appends
+//!   panics and lifecycle events to `%LOCALAPPDATA%\com.sehaz.bloom\
+//!   diagnostics.log`, rotating at 1 MB. It is write-only apart from that
+//!   file and shares no state with the snapshot.
+//! - The snapshot is this fork's read-only machine report, served by
+//!   `get_diagnostics` for Settings -> About -> Copy Diagnostics.
 //!
-//! Collection is strictly read-only. It never calls `set_taskbar_visibility`,
-//! never sets `TRAY_INTERACTION_ACTIVE`, and never touches Explorer — a
-//! diagnostic that perturbs the system it is describing is worthless.
+//! Every field below answers a question a bug reporter cannot answer about
+//! their own PC: how many monitors, where, at what scale; whether Explorer
+//! still owns the tray windows Bloom looks up by class; whether a crash
+//! marker survived.
 //!
-//! Process and app names are deliberately omitted. Counts and shapes only, so a
-//! pasted report does not leak the reporter's running software.
+//! Snapshot collection is strictly read-only. It never calls
+//! `set_taskbar_visibility`, never sets `TRAY_INTERACTION_ACTIVE`, and never
+//! touches Explorer â€” a diagnostic that perturbs the system it is describing
+//! is worthless.
+//!
+//! Process and app names are deliberately omitted, and settings are an
+//! allow-list. Counts and shapes only, so a pasted report does not leak the
+//! reporter's running software or their city from `bloom-weather-city`.
 
 use serde::Serialize;
 use windows::core::PCWSTR;
@@ -22,7 +32,100 @@ use windows::Win32::{
     UI::WindowsAndMessaging::{EnumWindows, GetClassNameA},
 };
 
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 use crate::state::*;
+
+// â”€â”€â”€ Runtime log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+const MAX_LOG_BYTES: u64 = 1024 * 1024;
+static LOG_PATH: OnceLock<Mutex<PathBuf>> = OnceLock::new();
+
+pub fn initialize() {
+    let Some(local_data) = std::env::var_os("LOCALAPPDATA") else {
+        return;
+    };
+    let directory = PathBuf::from(local_data).join("com.sehaz.bloom");
+    if fs::create_dir_all(&directory).is_err() {
+        return;
+    }
+    let _ = LOG_PATH.set(Mutex::new(directory.join("diagnostics.log")));
+
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let location = info
+            .location()
+            .map(|location| format!("{}:{}", location.file(), location.line()))
+            .unwrap_or_else(|| "unknown".into());
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|value| (*value).to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown panic".into());
+        record("panic", &format!("at={location} message={message}"));
+        previous_hook(info);
+    }));
+    record("startup", concat!("version=", env!("CARGO_PKG_VERSION")));
+}
+
+pub fn record(event: &str, detail: &str) {
+    let Some(path) = LOG_PATH.get() else {
+        return;
+    };
+    // Threads log at the same moment during startup, so wait briefly for the
+    // lock rather than dropping the line. The wait is bounded, so a panic
+    // raised while this thread already holds the lock can't deadlock.
+    let mut attempts = 0;
+    let path = loop {
+        match path.try_lock() {
+            Ok(path) => break path,
+            // A thread that panicked mid-write leaves the path itself intact.
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => break poisoned.into_inner(),
+            Err(_) if attempts < 50 => {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            Err(_) => return,
+        }
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let detail: String = detail
+        .chars()
+        .take(500)
+        .map(|ch| if ch == '\r' || ch == '\n' { ' ' } else { ch })
+        .collect();
+    let line = format!(
+        "{}.{:03} pid={} {} {}\n",
+        now.as_secs(),
+        now.subsec_millis(),
+        std::process::id(),
+        event,
+        detail
+    );
+    let _ = append_line(&path, &line);
+}
+
+fn append_line(path: &Path, line: &str) -> io::Result<()> {
+    if fs::metadata(path)
+        .map(|metadata| metadata.len() + line.len() as u64 > MAX_LOG_BYTES)
+        .unwrap_or(false)
+    {
+        let previous = path.with_extension("log.old");
+        let _ = fs::remove_file(&previous);
+        fs::rename(path, previous)?;
+    }
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    file.write_all(line.as_bytes())
+}
+
+// â”€â”€â”€ Read-only snapshot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 
 #[derive(Serialize)]
 pub struct MonitorInfo {
@@ -99,7 +202,7 @@ pub struct Diagnostics {
     pub state: RuntimeState,
     /// Only settings the user has actually changed. A key listed in
     /// `REPORTED_SETTINGS` but absent here is unset and running on the default
-    /// from SETTINGS.md — which is not the same as having been set back to that
+    /// from SETTINGS.md ΓÇö which is not the same as having been set back to that
     /// default, so the absence is meaningful and is called out below.
     pub settings: Vec<(String, String)>,
     /// Read by whoever reads the report, not by Bloom. Explains the omission
@@ -133,7 +236,7 @@ unsafe fn open_key(parent: HKEY, name: &str) -> Option<Key> {
 }
 
 /// Read a registry value as text. Windows mixes REG_SZ and REG_DWORD across
-/// these keys — UBR in particular is a DWORD, and UBR is the value that tells
+/// these keys ΓÇö UBR in particular is a DWORD, and UBR is the value that tells
 /// 24H2 from 25H2, so rejecting it would drop the single most useful field in
 /// the whole report.
 unsafe fn string(key: HKEY, name: &str) -> Option<String> {
@@ -203,7 +306,7 @@ fn os_info() -> OsInfo {
     unsafe {
         // ProductName is deliberately NOT read. Microsoft has not updated it
         // since Windows 8, so on Windows 11 it reports "Windows 10" while
-        // CurrentBuild is a Windows 11 build — a report field that actively
+        // CurrentBuild is a Windows 11 build ΓÇö a report field that actively
         // misdirects triage is worse than no field at all. Build numbers are
         // authoritative.
         let key = open_key(
@@ -293,7 +396,7 @@ fn monitors(app: &tauri::AppHandle) -> Vec<MonitorInfo> {
 }
 
 /// Settings worth attaching to a report: anything that changes layout or hook
-/// behaviour. Deliberately an allow-list — dumping every key would leak the
+/// behaviour. Deliberately an allow-list ΓÇö dumping every key would leak the
 /// reporter's city from `bloom-weather-city` and pinned app paths.
 pub const REPORTED_SETTINGS: &[&str] = &[
     "bloom-dock-mode",
@@ -380,7 +483,7 @@ mod tests {
     /// These all run on any Windows machine, so they catch the parts most
     /// likely to break: registry value decoding and the EnumWindows class
     /// filter. Neither needs an AppHandle, which is why they are testable at
-    /// all — and why they run on a CI runner with no desktop attached.
+    /// all ΓÇö and why they run on a CI runner with no desktop attached.
     #[test]
     fn notes_explain_every_deliberate_omission() {
         let joined = DIAGNOSTIC_NOTES.join(" ");
@@ -408,7 +511,7 @@ mod tests {
         let shell = shell_info();
         assert!(
             shell.shell_traywnd_found,
-            "Shell_TrayWnd not found by class name — Bloom's taskbar code would fail too"
+            "Shell_TrayWnd not found by class name ΓÇö Bloom's taskbar code would fail too"
         );
     }
 
@@ -452,5 +555,31 @@ mod tests {
         let text = serde_json::to_string_pretty(&value).expect("diagnostics must serialise");
         assert!(text.contains("shell_traywnd_found"));
         assert!(text.contains("notes"));
+    }
+
+    #[test]
+    fn log_rotates_before_exceeding_limit() {
+        let directory = std::env::temp_dir().join(format!(
+            "bloom-log-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("diagnostics.log");
+        std::fs::write(&path, vec![b'x'; MAX_LOG_BYTES as usize]).unwrap();
+        append_line(&path, "new event\n").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"new event\n");
+        assert_eq!(
+            std::fs::metadata(path.with_extension("log.old"))
+                .unwrap()
+                .len(),
+            MAX_LOG_BYTES
+        );
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_file(path.with_extension("log.old")).unwrap();
+        std::fs::remove_dir(directory).unwrap();
     }
 }

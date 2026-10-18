@@ -2403,6 +2403,14 @@ fn run_mouse_hook_thread() {
             return;
         }
         let mut hook = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), None, 0).ok();
+        crate::diagnostics::record(
+            "mouse_hook",
+            if hook.is_some() {
+                "installed"
+            } else {
+                "install failed; retrying"
+            },
+        );
         let mut point = windows::Win32::Foundation::POINT::default();
         if GetCursorPos(&mut point).is_ok() {
             queue_cursor(point);
@@ -2422,6 +2430,14 @@ fn run_mouse_hook_thread() {
                         let _ = UnhookWindowsHookEx(old);
                     }
                     hook = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), None, 0).ok();
+                    crate::diagnostics::record(
+                        "mouse_hook",
+                        if hook.is_some() {
+                            "reinstalled"
+                        } else {
+                            "reinstall failed"
+                        },
+                    );
                     if hook.is_some() {
                         queue_cursor(current);
                         MOUSE_HOOK_LAST_EVENT_MS.store(hook_tick_ms(), Ordering::Relaxed);
@@ -3520,7 +3536,12 @@ pub fn register_appbar(window: tauri::WebviewWindow) {
 
             if !MAIN_APPBAR_REGISTERED.load(Ordering::Relaxed) {
                 let _ = SHAppBarMessage(ABM_REMOVE, &mut abd);
-                if SHAppBarMessage(ABM_NEW, &mut abd) == 0 {
+                let registered = SHAppBarMessage(ABM_NEW, &mut abd);
+                crate::diagnostics::record(
+                    "main_appbar",
+                    &format!("registration_result={registered}"),
+                );
+                if registered == 0 {
                     eprintln!("Bloom: notch AppBar registration failed");
                     return;
                 }
@@ -3735,7 +3756,12 @@ fn register_dock_appbar_inner(window: tauri::WebviewWindow, attempt: i32) {
 
             if !DOCK_APPBAR_REGISTERED.load(Ordering::Relaxed) {
                 let _ = SHAppBarMessage(ABM_REMOVE, &mut abd);
-                if SHAppBarMessage(ABM_NEW, &mut abd) == 0 {
+                let registered = SHAppBarMessage(ABM_NEW, &mut abd);
+                crate::diagnostics::record(
+                    "dock_appbar",
+                    &format!("registration_result={registered}"),
+                );
+                if registered == 0 {
                     eprintln!("Bloom: dock AppBar registration failed");
                     return;
                 }
@@ -4338,6 +4364,10 @@ pub fn watch_webview_processes(app: &AppHandle) {
                     if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED
                         || kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED
                     {
+                        crate::diagnostics::record(
+                            "webview_failure",
+                            &format!("process_kind={kind:?}"),
+                        );
                         recover_from_webview_failure(&handle);
                     }
                     Ok(())
@@ -4363,8 +4393,10 @@ fn recover_from_webview_failure(handle: &AppHandle) {
         // A webview that dies right after launch would die again after a
         // restart, so give the taskbar back and exit instead of looping.
         if started.is_some_and(|elapsed| elapsed < Duration::from_secs(30)) {
+            crate::diagnostics::record("webview_recovery", "startup failure; exiting safely");
             crate::commands::restore_taskbar_and_exit(&handle);
         } else {
+            crate::diagnostics::record("webview_recovery", "restarting Bloom");
             crate::commands::restart_bloom(handle).await;
         }
     });
