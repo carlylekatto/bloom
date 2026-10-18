@@ -1,1 +1,7 @@
-{}
+{
+	"id": "notch-click-3.10",
+	"severity": "info",
+	"title": "Hover just peeks now — click to open",
+	"body": "The notch opens on click and remembers the panel you used last. Scroll or swipe to switch panels — or turn off Remember Last Panel in Settings → Notch for a fixed one.",
+	"url": "https://github.com/SehajveerSingh2005/bloom/releases/tag/v3.10.0"
+}

@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, sync_channel, Sender, SyncSender};
 use std::sync::{
     atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicIsize, AtomicU8, Ordering},
     Mutex, OnceLock,
@@ -1999,7 +1999,9 @@ pub fn setup_brightness_worker() {
     });
 }
 
-static MOUSE_HOOK_APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+static MOUSE_HOOK_UPDATES: OnceLock<SyncSender<()>> = OnceLock::new();
+static MOUSE_HOOK_CURSOR: AtomicI64 = AtomicI64::new(0);
+static MOUSE_HOOK_LAST_EVENT_MS: AtomicI64 = AtomicI64::new(0);
 static MH_LAST_MAIN_IGNORE: AtomicI32 = AtomicI32::new(-1);
 static MH_LAST_DOCK_IGNORE: AtomicI32 = AtomicI32::new(-1);
 static MH_LAST_OV_IGNORE: AtomicI32 = AtomicI32::new(-1);
@@ -2014,7 +2016,6 @@ static MH_RIGHT_EXPIRY_MS: AtomicI64 = AtomicI64::new(0);
 static MH_LAST_MONITOR_UPDATE_MS: AtomicI64 = AtomicI64::new(0);
 static MH_CACHED_MON_POS: Mutex<Option<(i32, i32)>> = Mutex::new(None);
 static MH_CACHED_MON_SIZE: Mutex<Option<(u32, u32)>> = Mutex::new(None);
-static MH_LAST_PROCESS_MS: AtomicI64 = AtomicI64::new(0);
 static CAPTURE_UI_ACTIVE: AtomicBool = AtomicBool::new(false);
 static CAPTURE_RECHECK: AtomicBool = AtomicBool::new(true);
 static CAPTURE_LAST_SCAN_MS: AtomicI64 = AtomicI64::new(0);
@@ -2265,13 +2266,120 @@ fn apply_capture_ui_state(app: &AppHandle, active: bool) {
 }
 
 pub fn setup_mouse_hook(app_handle: AppHandle) {
-    let _ = MOUSE_HOOK_APP_HANDLE.set(app_handle.clone());
+    let (updates, receiver) = sync_channel::<()>(1);
+    if MOUSE_HOOK_UPDATES.set(updates).is_err() {
+        return;
+    }
     setup_volume_mixer_watchdog(app_handle.clone());
     setup_dock_edge_watchdog(app_handle.clone());
-    setup_top_edge_watchdog(app_handle);
+    setup_top_edge_watchdog(app_handle.clone());
+    std::thread::Builder::new()
+        .name("bloom-cursor-worker".into())
+        .spawn(move || {
+            let frame = Duration::from_millis(32);
+            let mut last_processed = Instant::now() - frame;
+            while !SHUTTING_DOWN.load(Ordering::Relaxed) {
+                match receiver.recv_timeout(Duration::from_millis(500)) {
+                    Ok(()) => {
+                        if let Some(remaining) = frame.checked_sub(last_processed.elapsed()) {
+                            std::thread::sleep(remaining);
+                        }
+                        let cursor = unpack_cursor(MOUSE_HOOK_CURSOR.load(Ordering::Relaxed));
+                        process_mouse_position(&app_handle, cursor);
+                        last_processed = Instant::now();
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            }
+        })
+        .expect("Failed to start cursor worker");
+    std::thread::Builder::new()
+        .name("bloom-mouse-hook".into())
+        .spawn(|| {
+            while !SHUTTING_DOWN.load(Ordering::Relaxed) {
+                run_mouse_hook_thread();
+                if !SHUTTING_DOWN.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+            }
+        })
+        .expect("Failed to start mouse hook thread");
+}
+
+fn pack_cursor(point: windows::Win32::Foundation::POINT) -> i64 {
+    ((point.x as u32 as u64) << 32 | point.y as u32 as u64) as i64
+}
+
+fn unpack_cursor(packed: i64) -> windows::Win32::Foundation::POINT {
+    windows::Win32::Foundation::POINT {
+        x: (packed as u64 >> 32) as u32 as i32,
+        y: packed as u32 as i32,
+    }
+}
+
+fn queue_cursor(point: windows::Win32::Foundation::POINT) {
+    MOUSE_HOOK_CURSOR.store(pack_cursor(point), Ordering::Relaxed);
+    if let Some(updates) = MOUSE_HOOK_UPDATES.get() {
+        let _ = updates.try_send(());
+    }
+}
+
+fn hook_tick_ms() -> i64 {
+    unsafe { windows::Win32::System::SystemInformation::GetTickCount64() as i64 }
+}
+
+fn run_mouse_hook_thread() {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, GetCursorPos, GetMessageW, KillTimer, PeekMessageW, SetTimer,
+        TranslateMessage, UnhookWindowsHookEx, MSG, PM_NOREMOVE, WM_TIMER,
+    };
     unsafe {
-        SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), None, 0)
-            .expect("Failed to install mouse hook");
+        let mut message = MSG::default();
+        let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
+        // A timer wakes GetMessageW even when the mouse is idle, so the thread
+        // can shut down and detect a hook Windows silently removed on timeout.
+        let timer = SetTimer(None, 1, 500, None);
+        if timer == 0 {
+            eprintln!("Bloom mouse hook: timer creation failed; retrying");
+            return;
+        }
+        let mut hook = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), None, 0).ok();
+        let mut point = windows::Win32::Foundation::POINT::default();
+        if GetCursorPos(&mut point).is_ok() {
+            queue_cursor(point);
+            MOUSE_HOOK_LAST_EVENT_MS.store(hook_tick_ms(), Ordering::Relaxed);
+        }
+        while GetMessageW(&mut message, None, 0, 0).0 > 0 {
+            if message.message == WM_TIMER && message.wParam.0 == timer {
+                if SHUTTING_DOWN.load(Ordering::Relaxed) {
+                    break;
+                }
+                let mut current = windows::Win32::Foundation::POINT::default();
+                let cursor_moved_without_hook = GetCursorPos(&mut current).is_ok()
+                    && pack_cursor(current) != MOUSE_HOOK_CURSOR.load(Ordering::Relaxed)
+                    && hook_tick_ms() - MOUSE_HOOK_LAST_EVENT_MS.load(Ordering::Relaxed) > 750;
+                if hook.is_none() || cursor_moved_without_hook {
+                    if let Some(old) = hook.take() {
+                        let _ = UnhookWindowsHookEx(old);
+                    }
+                    hook = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), None, 0).ok();
+                    if hook.is_some() {
+                        queue_cursor(current);
+                        MOUSE_HOOK_LAST_EVENT_MS.store(hook_tick_ms(), Ordering::Relaxed);
+                    }
+                }
+            } else {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+        if timer != 0 {
+            let _ = KillTimer(None, timer);
+        }
+        if let Some(hook) = hook {
+            let _ = UnhookWindowsHookEx(hook);
+        }
     }
 }
 
@@ -2715,10 +2823,8 @@ fn update_dock_interaction(
                 if let Ok(rect) = MENU_RECT.try_lock() {
                     if let Some(r) = *rect {
                         let scale = dock_win.scale_factor().unwrap_or(1.0);
-                        let rx =
-                            win_pos.x + (r.x as f64 * scale) as i32 - (5.0 * scale) as i32;
-                        let ry =
-                            win_pos.y + (r.y as f64 * scale) as i32 - (5.0 * scale) as i32;
+                        let rx = win_pos.x + (r.x as f64 * scale) as i32 - (5.0 * scale) as i32;
+                        let ry = win_pos.y + (r.y as f64 * scale) as i32 - (5.0 * scale) as i32;
                         let rw = (r.width as f64 * scale) as i32 + (10.0 * scale) as i32;
                         let rh = (r.height as f64 * scale) as i32 + (10.0 * scale) as i32;
                         if cursor.x >= rx
@@ -2806,197 +2912,179 @@ unsafe extern "system" fn mouse_hook_proc(
     lparam: LPARAM,
 ) -> windows::Win32::Foundation::LRESULT {
     if code >= 0 && wparam.0 == WM_MOUSEMOVE as usize && !SHUTTING_DOWN.load(Ordering::Relaxed) {
-        // Throttle to ~30fps (32ms) to match old polling cadence.
-        // Without this, state checks and set_ignore_cursor_events fire on
-        // every pixel of cursor movement, causing notch flicker at edges.
-        let now = now_ms();
-        let last = MH_LAST_PROCESS_MS.load(Ordering::Relaxed);
-        if now - last < 32 {
-            return CallNextHookEx(None, code, wparam, lparam);
+        let cursor = (*(lparam.0 as *const MSLLHOOKSTRUCT)).pt;
+        queue_cursor(cursor);
+        MOUSE_HOOK_LAST_EVENT_MS.store(hook_tick_ms(), Ordering::Relaxed);
+    }
+    CallNextHookEx(None, code, wparam, lparam)
+}
+
+fn process_mouse_position(app_handle: &AppHandle, cursor: windows::Win32::Foundation::POINT) {
+    if SHUTTING_DOWN.load(Ordering::Relaxed) {
+        return;
+    }
+    let now = now_ms();
+    {
+        // While a capture UI (Snipping Tool) is up, Bloom is fully
+        // click-through and skipped entirely so the tool owns the screen.
+        if CAPTURE_UI_ACTIVE.load(Ordering::Relaxed) {
+            if MH_LAST_MAIN_IGNORE.load(Ordering::Relaxed) != 1 {
+                if let Some(w) = app_handle.get_webview_window("main") {
+                    let _ = w.set_ignore_cursor_events(true);
+                }
+                MH_LAST_MAIN_IGNORE.store(1, Ordering::Relaxed);
+            }
+            if MH_LAST_DOCK_IGNORE.load(Ordering::Relaxed) != 1 {
+                if let Some(w) = app_handle.get_webview_window("dock") {
+                    let _ = w.set_ignore_cursor_events(true);
+                }
+                MH_LAST_DOCK_IGNORE.store(1, Ordering::Relaxed);
+            }
+            if MH_LAST_OV_IGNORE.load(Ordering::Relaxed) != 1 {
+                if let Some(w) = app_handle.get_webview_window("overlay") {
+                    let _ = w.set_ignore_cursor_events(true);
+                }
+                MH_LAST_OV_IGNORE.store(1, Ordering::Relaxed);
+            }
+            if MH_LAST_EDGE_HOVER.swap(0, Ordering::Relaxed) != 0 {
+                let _ = app_handle.emit("dock-edge-hover", false);
+            }
+            if MH_LAST_TOP_EDGE_HOVER.swap(0, Ordering::Relaxed) != 0 {
+                let _ = app_handle.emit("notch-edge-hover", false);
+            }
+            return;
         }
-        MH_LAST_PROCESS_MS.store(now, Ordering::Relaxed);
 
-        if let Some(app_handle) = MOUSE_HOOK_APP_HANDLE.get() {
-            let pt = &*(lparam.0 as *const MSLLHOOKSTRUCT);
-            let cursor = pt.pt;
-
-            // While a capture UI (Snipping Tool) is up, Bloom is fully
-            // click-through and skipped entirely so the tool owns the screen.
-            if CAPTURE_UI_ACTIVE.load(Ordering::Relaxed) {
-                if MH_LAST_MAIN_IGNORE.load(Ordering::Relaxed) != 1 {
-                    if let Some(w) = app_handle.get_webview_window("main") {
-                        let _ = w.set_ignore_cursor_events(true);
-                    }
-                    MH_LAST_MAIN_IGNORE.store(1, Ordering::Relaxed);
-                }
-                if MH_LAST_DOCK_IGNORE.load(Ordering::Relaxed) != 1 {
-                    if let Some(w) = app_handle.get_webview_window("dock") {
-                        let _ = w.set_ignore_cursor_events(true);
-                    }
-                    MH_LAST_DOCK_IGNORE.store(1, Ordering::Relaxed);
-                }
-                if MH_LAST_OV_IGNORE.load(Ordering::Relaxed) != 1 {
-                    if let Some(w) = app_handle.get_webview_window("overlay") {
-                        let _ = w.set_ignore_cursor_events(true);
-                    }
-                    MH_LAST_OV_IGNORE.store(1, Ordering::Relaxed);
-                }
-                if MH_LAST_EDGE_HOVER.swap(0, Ordering::Relaxed) != 0 {
-                    let _ = app_handle.emit("dock-edge-hover", false);
-                }
-                if MH_LAST_TOP_EDGE_HOVER.swap(0, Ordering::Relaxed) != 0 {
-                    let _ = app_handle.emit("notch-edge-hover", false);
-                }
-                return CallNextHookEx(None, code, wparam, lparam);
+        // Refresh cached monitor info every 1s
+        if now - MH_LAST_MONITOR_UPDATE_MS.load(Ordering::Relaxed) > 1000 {
+            if let Ok(Some(monitor)) = app_handle.primary_monitor() {
+                let pos = *monitor.position();
+                let size = *monitor.size();
+                *MH_CACHED_MON_POS.lock().unwrap() = Some((pos.x, pos.y));
+                *MH_CACHED_MON_SIZE.lock().unwrap() = Some((size.width, size.height));
+                MH_LAST_MONITOR_UPDATE_MS.store(now, Ordering::Relaxed);
             }
+        }
 
-            // Refresh cached monitor info every 1s
-            if now - MH_LAST_MONITOR_UPDATE_MS.load(Ordering::Relaxed) > 1000 {
-                if let Ok(Some(monitor)) = app_handle.primary_monitor() {
-                    let pos = *monitor.position();
-                    let size = *monitor.size();
-                    *MH_CACHED_MON_POS.lock().unwrap() = Some((pos.x, pos.y));
-                    *MH_CACHED_MON_SIZE.lock().unwrap() = Some((size.width, size.height));
-                    MH_LAST_MONITOR_UPDATE_MS.store(now, Ordering::Relaxed);
-                }
-            }
+        let cached_pos = MH_CACHED_MON_POS.lock().unwrap().unwrap_or((0, 0));
+        let cached_size = MH_CACHED_MON_SIZE.lock().unwrap().unwrap_or((1920, 1080));
+        let mon_x = cached_pos.0;
+        let mon_y = cached_pos.1;
+        let mon_w = cached_size.0 as i32;
+        let mon_h = cached_size.1 as i32;
 
-            let cached_pos = MH_CACHED_MON_POS.lock().unwrap().unwrap_or((0, 0));
-            let cached_size = MH_CACHED_MON_SIZE.lock().unwrap().unwrap_or((1920, 1080));
-            let mon_x = cached_pos.0;
-            let mon_y = cached_pos.1;
-            let mon_w = cached_size.0 as i32;
-            let mon_h = cached_size.1 as i32;
+        let fg_fs = CURRENT_FOREGROUND_FULLSCREEN.load(Ordering::Relaxed);
 
-            let fg_fs = CURRENT_FOREGROUND_FULLSCREEN.load(Ordering::Relaxed);
+        // --- Dock Interaction ---
+        update_dock_interaction(app_handle, cursor, now, fg_fs);
 
-            // --- Dock Interaction ---
-            update_dock_interaction(app_handle, cursor, now, fg_fs);
+        // --- Main (TopBar) Interaction ---
+        update_main_interaction(app_handle, cursor, now, fg_fs);
 
-            // --- Main (TopBar) Interaction ---
-            update_main_interaction(app_handle, cursor, now, fg_fs);
+        // Expanded per-app volume mixer (if open) — the reported rect covers
+        // the notch plus panel, so it keeps the card alive and clickable.
+        let mixer_rect = volume_mixer_physical_rect_for(app_handle);
+        let in_mixer = mixer_rect.is_some_and(|(rx, ry, rw, rh)| {
+            cursor.x >= rx && cursor.x <= rx + rw && cursor.y >= ry && cursor.y <= ry + rh
+        });
 
-            // Expanded per-app volume mixer (if open) — the reported rect covers
-            // the notch plus panel, so it keeps the card alive and clickable.
-            let mixer_rect = volume_mixer_physical_rect_for(app_handle);
-            let in_mixer = mixer_rect.is_some_and(|(rx, ry, rw, rh)| {
-                cursor.x >= rx && cursor.x <= rx + rw && cursor.y >= ry && cursor.y <= ry + rh
-            });
+        // --- Left Edge (Volume) ---
+        if !fg_fs {
+            let at_left_edge =
+                cursor.x <= (mon_x + 8) && cursor.y >= mon_y && cursor.y <= (mon_y + mon_h);
 
-            // --- Left Edge (Volume) ---
-            if !fg_fs {
-                let at_left_edge =
-                    cursor.x <= (mon_x + 8) && cursor.y >= mon_y && cursor.y <= (mon_y + mon_h);
-
-                // The collapsed card extends past the 8px edge band, so once the
-                // edge hover is established, keep it alive while the cursor is
-                // over the card too (otherwise pausing on the mixer button lets
-                // the hover expire and the HUD hides mid-click).
-                let over_card = !at_left_edge
-                    && !in_mixer
-                    && MH_LAST_LEFT_EDGE_HOVER.load(Ordering::Relaxed) != 0
-                    && app_handle
-                        .primary_monitor()
-                        .ok()
-                        .flatten()
-                        .is_some_and(|m| {
-                            let bloom_scale = crate::utils::get_bloom_scale(app_handle);
-                            let ms = m.size();
-                            let mp = m.position();
-                            let sc = m.scale_factor() * bloom_scale;
-                            let nw = (42.0 * sc) as i32;
-                            let nh = (196.0 * sc) as i32;
-                            let nx = mp.x;
-                            let ny = mp.y + (ms.height as i32 / 2) - (nh / 2);
-                            cursor.x >= nx
-                                && cursor.x <= nx + nw
-                                && cursor.y >= ny
-                                && cursor.y <= ny + nh
-                        });
-
-                if at_left_edge || in_mixer || over_card {
-                    MH_LEFT_EXPIRY_MS.store(now + 500, Ordering::Relaxed);
-                }
-
-                let final_left_hover = now < MH_LEFT_EXPIRY_MS.load(Ordering::Relaxed);
-                let prev = MH_LAST_LEFT_EDGE_HOVER.load(Ordering::Relaxed);
-                let new_val = if final_left_hover { 1 } else { 0 };
-                if prev != new_val {
-                    let _ = app_handle.emit("volume-edge-hover", final_left_hover);
-                    MH_LAST_LEFT_EDGE_HOVER.store(new_val, Ordering::Relaxed);
-                }
-            } else {
-                let prev = MH_LAST_LEFT_EDGE_HOVER.load(Ordering::Relaxed);
-                if prev != 0 {
-                    let _ = app_handle.emit("volume-edge-hover", false);
-                    MH_LAST_LEFT_EDGE_HOVER.store(0, Ordering::Relaxed);
-                }
-            }
-
-            // --- Right Edge (Brightness) ---
-            if !fg_fs {
-                let at_right_edge = cursor.x >= (mon_x + mon_w - 8)
-                    && cursor.y >= mon_y
-                    && cursor.y <= (mon_y + mon_h);
-
-                if at_right_edge {
-                    MH_RIGHT_EXPIRY_MS.store(now + 500, Ordering::Relaxed);
-                }
-
-                let final_right_hover = now < MH_RIGHT_EXPIRY_MS.load(Ordering::Relaxed);
-                let prev = MH_LAST_RIGHT_EDGE_HOVER.load(Ordering::Relaxed);
-                let new_val = if final_right_hover { 1 } else { 0 };
-                if prev != new_val {
-                    let _ = app_handle.emit("brightness-edge-hover", final_right_hover);
-                    MH_LAST_RIGHT_EDGE_HOVER.store(new_val, Ordering::Relaxed);
-                }
-            } else {
-                let prev = MH_LAST_RIGHT_EDGE_HOVER.load(Ordering::Relaxed);
-                if prev != 0 {
-                    let _ = app_handle.emit("brightness-edge-hover", false);
-                    MH_LAST_RIGHT_EDGE_HOVER.store(0, Ordering::Relaxed);
-                }
-            }
-
-            // --- Overlay cursor passthrough ---
-            if let Some(ov_win) = app_handle.get_webview_window("overlay") {
-                if fg_fs {
-                    let prev = MH_LAST_OV_IGNORE.load(Ordering::Relaxed);
-                    if prev != 1 {
-                        if let Ok(hwnd) = ov_win.hwnd() {
-                            re_assert_topmost(hwnd);
-                        }
-                        let _ = ov_win.set_ignore_cursor_events(true);
-                        MH_LAST_OV_IGNORE.store(1, Ordering::Relaxed);
-                    }
-                } else {
-                    // The overlay applies `bloom-scale` as CSS zoom, so the cards
-                    // are larger than 42x196 CSS px for non-default scales.
-                    let bloom_scale = crate::utils::get_bloom_scale(app_handle);
-                    let over_left = in_mixer
-                        || if let Ok(Some(m)) = ov_win.primary_monitor() {
-                            let ms = m.size();
-                            let mp = m.position();
-                            let sc = m.scale_factor() * bloom_scale;
-                            let nw = (42.0 * sc) as i32;
-                            let nh = (196.0 * sc) as i32;
-                            let nx = mp.x;
-                            let ny = mp.y + (ms.height as i32 / 2) - (nh / 2);
-                            cursor.x >= nx
-                                && cursor.x <= nx + nw
-                                && cursor.y >= ny
-                                && cursor.y <= ny + nh
-                        } else {
-                            false
-                        };
-
-                    let over_right = if let Ok(Some(m)) = ov_win.primary_monitor() {
+            // The collapsed card extends past the 8px edge band, so once the
+            // edge hover is established, keep it alive while the cursor is
+            // over the card too (otherwise pausing on the mixer button lets
+            // the hover expire and the HUD hides mid-click).
+            let over_card = !at_left_edge
+                && !in_mixer
+                && MH_LAST_LEFT_EDGE_HOVER.load(Ordering::Relaxed) != 0
+                && app_handle
+                    .primary_monitor()
+                    .ok()
+                    .flatten()
+                    .is_some_and(|m| {
+                        let bloom_scale = crate::utils::get_bloom_scale(app_handle);
                         let ms = m.size();
                         let mp = m.position();
                         let sc = m.scale_factor() * bloom_scale;
                         let nw = (42.0 * sc) as i32;
                         let nh = (196.0 * sc) as i32;
-                        let nx = mp.x + ms.width as i32 - nw;
+                        let nx = mp.x;
+                        let ny = mp.y + (ms.height as i32 / 2) - (nh / 2);
+                        cursor.x >= nx
+                            && cursor.x <= nx + nw
+                            && cursor.y >= ny
+                            && cursor.y <= ny + nh
+                    });
+
+            if at_left_edge || in_mixer || over_card {
+                MH_LEFT_EXPIRY_MS.store(now + 500, Ordering::Relaxed);
+            }
+
+            let final_left_hover = now < MH_LEFT_EXPIRY_MS.load(Ordering::Relaxed);
+            let prev = MH_LAST_LEFT_EDGE_HOVER.load(Ordering::Relaxed);
+            let new_val = if final_left_hover { 1 } else { 0 };
+            if prev != new_val {
+                let _ = app_handle.emit("volume-edge-hover", final_left_hover);
+                MH_LAST_LEFT_EDGE_HOVER.store(new_val, Ordering::Relaxed);
+            }
+        } else {
+            let prev = MH_LAST_LEFT_EDGE_HOVER.load(Ordering::Relaxed);
+            if prev != 0 {
+                let _ = app_handle.emit("volume-edge-hover", false);
+                MH_LAST_LEFT_EDGE_HOVER.store(0, Ordering::Relaxed);
+            }
+        }
+
+        // --- Right Edge (Brightness) ---
+        if !fg_fs {
+            let at_right_edge =
+                cursor.x >= (mon_x + mon_w - 8) && cursor.y >= mon_y && cursor.y <= (mon_y + mon_h);
+
+            if at_right_edge {
+                MH_RIGHT_EXPIRY_MS.store(now + 500, Ordering::Relaxed);
+            }
+
+            let final_right_hover = now < MH_RIGHT_EXPIRY_MS.load(Ordering::Relaxed);
+            let prev = MH_LAST_RIGHT_EDGE_HOVER.load(Ordering::Relaxed);
+            let new_val = if final_right_hover { 1 } else { 0 };
+            if prev != new_val {
+                let _ = app_handle.emit("brightness-edge-hover", final_right_hover);
+                MH_LAST_RIGHT_EDGE_HOVER.store(new_val, Ordering::Relaxed);
+            }
+        } else {
+            let prev = MH_LAST_RIGHT_EDGE_HOVER.load(Ordering::Relaxed);
+            if prev != 0 {
+                let _ = app_handle.emit("brightness-edge-hover", false);
+                MH_LAST_RIGHT_EDGE_HOVER.store(0, Ordering::Relaxed);
+            }
+        }
+
+        // --- Overlay cursor passthrough ---
+        if let Some(ov_win) = app_handle.get_webview_window("overlay") {
+            if fg_fs {
+                let prev = MH_LAST_OV_IGNORE.load(Ordering::Relaxed);
+                if prev != 1 {
+                    if let Ok(hwnd) = ov_win.hwnd() {
+                        re_assert_topmost(hwnd);
+                    }
+                    let _ = ov_win.set_ignore_cursor_events(true);
+                    MH_LAST_OV_IGNORE.store(1, Ordering::Relaxed);
+                }
+            } else {
+                // The overlay applies `bloom-scale` as CSS zoom, so the cards
+                // are larger than 42x196 CSS px for non-default scales.
+                let bloom_scale = crate::utils::get_bloom_scale(app_handle);
+                let over_left = in_mixer
+                    || if let Ok(Some(m)) = ov_win.primary_monitor() {
+                        let ms = m.size();
+                        let mp = m.position();
+                        let sc = m.scale_factor() * bloom_scale;
+                        let nw = (42.0 * sc) as i32;
+                        let nh = (196.0 * sc) as i32;
+                        let nx = mp.x;
                         let ny = mp.y + (ms.height as i32 / 2) - (nh / 2);
                         cursor.x >= nx
                             && cursor.x <= nx + nw
@@ -3006,21 +3094,32 @@ unsafe extern "system" fn mouse_hook_proc(
                         false
                     };
 
-                    let should_ignore = !(over_left || over_right);
-                    let prev = MH_LAST_OV_IGNORE.load(Ordering::Relaxed);
-                    let new_val = if should_ignore { 1 } else { 0 };
-                    if prev != new_val {
-                        if let Ok(hwnd) = ov_win.hwnd() {
-                            re_assert_topmost(hwnd);
-                        }
-                        let _ = ov_win.set_ignore_cursor_events(should_ignore);
-                        MH_LAST_OV_IGNORE.store(new_val, Ordering::Relaxed);
+                let over_right = if let Ok(Some(m)) = ov_win.primary_monitor() {
+                    let ms = m.size();
+                    let mp = m.position();
+                    let sc = m.scale_factor() * bloom_scale;
+                    let nw = (42.0 * sc) as i32;
+                    let nh = (196.0 * sc) as i32;
+                    let nx = mp.x + ms.width as i32 - nw;
+                    let ny = mp.y + (ms.height as i32 / 2) - (nh / 2);
+                    cursor.x >= nx && cursor.x <= nx + nw && cursor.y >= ny && cursor.y <= ny + nh
+                } else {
+                    false
+                };
+
+                let should_ignore = !(over_left || over_right);
+                let prev = MH_LAST_OV_IGNORE.load(Ordering::Relaxed);
+                let new_val = if should_ignore { 1 } else { 0 };
+                if prev != new_val {
+                    if let Ok(hwnd) = ov_win.hwnd() {
+                        re_assert_topmost(hwnd);
                     }
+                    let _ = ov_win.set_ignore_cursor_events(should_ignore);
+                    MH_LAST_OV_IGNORE.store(new_val, Ordering::Relaxed);
                 }
             }
         }
     }
-    CallNextHookEx(None, code, wparam, lparam)
 }
 
 pub fn trigger_app_scan() {
@@ -3514,7 +3613,9 @@ fn register_dock_appbar_inner(window: tauri::WebviewWindow, attempt: i32) {
     if let Ok(Some(monitor)) = window.app_handle().primary_monitor() {
         let m_size = monitor.size();
         let m_pos = monitor.position();
-        let hwnd = window.hwnd().unwrap();
+        let Ok(hwnd) = window.hwnd() else {
+            return;
+        };
         let scale = monitor.scale_factor();
         let bloom_scale = crate::utils::get_bloom_scale(window.app_handle());
 
@@ -3547,9 +3648,9 @@ fn register_dock_appbar_inner(window: tauri::WebviewWindow, attempt: i32) {
                 SHAppBarMessage, ABE_BOTTOM, ABM_NEW, ABM_QUERYPOS, ABM_SETPOS, APPBARDATA,
             };
             use windows::Win32::UI::WindowsAndMessaging::{
-                GetWindowLongPtrW, GetWindowRect, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE,
-                SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER, WS_EX_NOACTIVATE as WS_EX_NA,
-                WS_EX_TOOLWINDOW,
+                GetWindowLongPtrW, GetWindowRect, RegisterWindowMessageW, SetWindowLongPtrW,
+                SetWindowPos, GWL_EXSTYLE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER,
+                WS_EX_NOACTIVATE as WS_EX_NA, WS_EX_TOOLWINDOW,
             };
 
             // Set extended styles (ToolWindow and NoActivate)
@@ -3557,17 +3658,21 @@ fn register_dock_appbar_inner(window: tauri::WebviewWindow, attempt: i32) {
             ex_style |= (WS_EX_TOOLWINDOW.0 | WS_EX_NA.0) as usize;
             let _ = SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style as isize);
 
-            // Hide native taskbar first to free up space
-            set_taskbar_visibility(false, false);
-
+            let callback_message = RegisterWindowMessageW(windows::core::w!("BloomDockAppBar"));
+            if callback_message == 0 {
+                return;
+            }
             let mut abd = APPBARDATA {
                 cbSize: std::mem::size_of::<APPBARDATA>() as u32,
                 hWnd: hwnd,
+                uCallbackMessage: callback_message,
                 ..Default::default()
             };
 
             if !DOCK_APPBAR_REGISTERED.load(Ordering::Relaxed) {
-                SHAppBarMessage(ABM_NEW, &mut abd);
+                if SHAppBarMessage(ABM_NEW, &mut abd) == 0 {
+                    return;
+                }
                 DOCK_APPBAR_REGISTERED.store(true, Ordering::Relaxed);
             }
 
@@ -3586,6 +3691,9 @@ fn register_dock_appbar_inner(window: tauri::WebviewWindow, attempt: i32) {
             // ignoring what ABM_SETPOS might have tried to "correct" (like stacking on invisible taskbar)
             let final_y = m_pos.y + m_size.height as i32 - ph;
             let final_width = abd.rc.right - abd.rc.left;
+            if final_width <= 0 {
+                return;
+            }
 
             let mut current_rect = RECT::default();
             let mut already_positioned = false;
@@ -3601,8 +3709,8 @@ fn register_dock_appbar_inner(window: tauri::WebviewWindow, attempt: i32) {
                 }
             }
 
-            if !already_positioned {
-                let _ = SetWindowPos(
+            if !already_positioned
+                && SetWindowPos(
                     hwnd,
                     None,
                     abd.rc.left,
@@ -3610,15 +3718,30 @@ fn register_dock_appbar_inner(window: tauri::WebviewWindow, attempt: i32) {
                     final_width,
                     ph,
                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-                );
+                )
+                .is_err()
+            {
+                return;
+            }
+            let mut placed = RECT::default();
+            if GetWindowRect(hwnd, &mut placed).is_err()
+                || placed.left != abd.rc.left
+                || placed.top != final_y
+                || placed.right - placed.left != final_width
+                || placed.bottom - placed.top != ph
+            {
+                return;
             }
 
             // Re-assert topmost — same reason as register_appbar.
             re_assert_topmost(hwnd);
 
             // Always ensure the window is visible — show() is idempotent
-            if !window.is_visible().unwrap_or(false) {
-                let _ = window.show();
+            if !window.is_visible().unwrap_or(false) && window.show().is_err() {
+                return;
+            }
+            if window.is_visible().unwrap_or(false) && set_taskbar_visibility(false, false) {
+                NATIVE_TASKBAR_HIDDEN.store(true, Ordering::Relaxed);
             }
         }
     } else {
@@ -4157,8 +4280,17 @@ fn recover_from_webview_failure(handle: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_helper_name, is_launchable_entry, notch_mode_reserves_work_area, win_number_index,
+        is_helper_name, is_launchable_entry, notch_mode_reserves_work_area, pack_cursor,
+        unpack_cursor, win_number_index,
     };
+
+    #[test]
+    fn cursor_snapshot_preserves_negative_virtual_desktop_coordinates() {
+        for (x, y) in [(0, 0), (-1920, 540), (3840, -1080), (i32::MIN, i32::MAX)] {
+            let point = windows::Win32::Foundation::POINT { x, y };
+            assert_eq!(unpack_cursor(pack_cursor(point)), point);
+        }
+    }
 
     #[test]
     fn win_number_maps_top_row_digits_only() {

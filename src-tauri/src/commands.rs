@@ -174,7 +174,9 @@ pub async fn init_dock(app: AppHandle, mode: String) {
 
     if let Some(dock_win) = app.get_webview_window("dock") {
         // 1. Always show first — idempotent, required before any positioning
-        let _ = dock_win.show();
+        if dock_win.show().is_err() {
+            return;
+        }
         if let Ok(hwnd) = dock_win.hwnd() {
             re_assert_topmost(hwnd);
         }
@@ -220,28 +222,46 @@ pub async fn init_dock(app: AppHandle, mode: String) {
                                 continue;
                             }
                             let final_y = m_pos.y + m_size.height as i32 - ph;
-                            unsafe {
+                            let positioned = unsafe {
                                 use windows::Win32::Foundation::HWND;
                                 use windows::Win32::UI::WindowsAndMessaging::{
-                                    SetWindowPos, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER,
+                                    GetWindowRect, SetWindowPos, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+                                    SWP_NOZORDER,
                                 };
-                                let _ = SetWindowPos(
-                                    HWND(hwnd_val as *mut _),
+                                let hwnd = HWND(hwnd_val as *mut _);
+                                let moved = SetWindowPos(
+                                    hwnd,
                                     None,
                                     m_pos.x,
                                     final_y,
                                     m_size.width as i32,
                                     ph,
                                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-                                );
+                                )
+                                .is_ok();
+                                let mut rect = windows::Win32::Foundation::RECT::default();
+                                moved
+                                    && GetWindowRect(hwnd, &mut rect).is_ok()
+                                    && rect.left == m_pos.x
+                                    && rect.top == final_y
+                                    && rect.right - rect.left == m_size.width as i32
+                                    && rect.bottom - rect.top == ph
+                            };
+                            if !positioned {
+                                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                                continue;
                             }
                             // Re-assert topmost after repositioning
                             if let Ok(hwnd) = dock_clone.hwnd() {
                                 re_assert_topmost(hwnd);
                             }
                             // Ensure visible after positioning
-                            if dock_enabled() {
-                                let _ = dock_clone.show();
+                            if dock_enabled()
+                                && dock_clone.show().is_ok()
+                                && dock_clone.is_visible().unwrap_or(false)
+                                && set_taskbar_visibility(false, false)
+                            {
+                                NATIVE_TASKBAR_HIDDEN.store(true, Ordering::Relaxed);
                             }
                             break;
                         }
@@ -253,11 +273,9 @@ pub async fn init_dock(app: AppHandle, mode: String) {
             });
         }
 
-        // 3. Hide taskbar after showing dock (not before, so user always has something)
-        set_taskbar_visibility(false, false);
-        NATIVE_TASKBAR_HIDDEN.store(true, Ordering::Relaxed);
-
-        // 4. Reset overlap state so the overlap thread re-syncs cleanly
+        // Fixed mode completes the taskbar handoff in register_dock_appbar_inner;
+        // auto-hide mode completes it after SetWindowPos and show both succeed.
+        // Reset overlap state so the overlap thread re-syncs cleanly.
         CURRENT_DOCK_OVERLAP.store(0, Ordering::Relaxed);
         let _ = app.emit("dock-overlap", false);
         // Sync the adaptive-dock signal so the dock expands immediately if a
@@ -273,11 +291,14 @@ fn disable_dock(app: &AppHandle) {
     // Clear this before showing the native taskbar: the WinEvent hook can run
     // during ShowWindow and would otherwise immediately hide it again.
     NATIVE_TASKBAR_HIDDEN.store(false, Ordering::Relaxed);
+    // Keep Bloom's dock available if Explorer has not made its taskbar visible.
+    if !set_taskbar_visibility(true, true) {
+        return;
+    }
     if let Some(dock_win) = app.get_webview_window("dock") {
         disable_dock_appbar(dock_win);
     }
     DOCK_APPBAR_REGISTERED.store(false, Ordering::Relaxed);
-    set_taskbar_visibility(true, true);
     crate::services::reconcile_main_appbar(app);
 }
 
@@ -360,24 +381,45 @@ pub async fn change_dock_mode(app: AppHandle, mode: String) {
                                     continue;
                                 }
                                 let final_y = m_pos.y + m_size.height as i32 - ph;
-                                unsafe {
+                                let positioned = unsafe {
                                     use windows::Win32::Foundation::HWND;
                                     use windows::Win32::UI::WindowsAndMessaging::{
-                                        SetWindowPos, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-                                        SWP_NOZORDER,
+                                        GetWindowRect, SetWindowPos, SWP_FRAMECHANGED,
+                                        SWP_NOACTIVATE, SWP_NOZORDER,
                                     };
-                                    let _ = SetWindowPos(
-                                        HWND(hwnd_val as *mut _),
+                                    let hwnd = HWND(hwnd_val as *mut _);
+                                    let moved = SetWindowPos(
+                                        hwnd,
                                         None,
                                         m_pos.x,
                                         final_y,
                                         m_size.width as i32,
                                         ph,
                                         SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-                                    );
+                                    )
+                                    .is_ok();
+                                    let mut rect = windows::Win32::Foundation::RECT::default();
+                                    moved
+                                        && GetWindowRect(hwnd, &mut rect).is_ok()
+                                        && rect.left == m_pos.x
+                                        && rect.top == final_y
+                                        && rect.right - rect.left == m_size.width as i32
+                                        && rect.bottom - rect.top == ph
+                                };
+                                if !positioned {
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(300))
+                                        .await;
+                                    continue;
                                 }
                                 if let Ok(hwnd) = dock_clone.hwnd() {
                                     re_assert_topmost(hwnd);
+                                }
+                                if dock_enabled()
+                                    && dock_clone.show().is_ok()
+                                    && dock_clone.is_visible().unwrap_or(false)
+                                    && set_taskbar_visibility(false, false)
+                                {
+                                    NATIVE_TASKBAR_HIDDEN.store(true, Ordering::Relaxed);
                                 }
                                 break;
                             }
@@ -394,9 +436,6 @@ pub async fn change_dock_mode(app: AppHandle, mode: String) {
         if let Ok(hwnd) = dock_win.hwnd() {
             re_assert_topmost(hwnd);
         }
-        set_taskbar_visibility(false, false);
-        NATIVE_TASKBAR_HIDDEN.store(true, Ordering::Relaxed);
-
         // Sync the current overlap state immediately to the frontend
         let current = CURRENT_DOCK_OVERLAP.load(Ordering::Relaxed);
         if current != -1 {
@@ -2379,8 +2418,8 @@ pub fn open_system_tray() {
 
                 // Once closed, hide the taskbar only if the dock is still enabled.
                 if dock_enabled() {
-                    crate::utils::set_taskbar_visibility(false, false);
-                    crate::state::NATIVE_TASKBAR_HIDDEN.store(true, Ordering::Relaxed);
+                    let hidden = crate::utils::set_taskbar_visibility(false, false);
+                    crate::state::NATIVE_TASKBAR_HIDDEN.store(hidden, Ordering::Relaxed);
                 }
 
                 // Revert transparency
@@ -2403,8 +2442,8 @@ pub fn open_system_tray() {
             });
         } else {
             // If already toggled on manually, toggle off
-            crate::utils::set_taskbar_visibility(false, false);
-            crate::state::NATIVE_TASKBAR_HIDDEN.store(true, Ordering::Relaxed);
+            let hidden = crate::utils::set_taskbar_visibility(false, false);
+            crate::state::NATIVE_TASKBAR_HIDDEN.store(hidden, Ordering::Relaxed);
 
             let exstyle = GetWindowLongA(hwnd, GWL_EXSTYLE);
             let _ = SetLayeredWindowAttributes(
