@@ -43,6 +43,29 @@ export function appIdentity(p: string, executable?: string, name?: string) {
 
 const itemKey = (app: AppInfo) => appIdentity(app.path, app.executable, app.name);
 
+// WinEvent notifications can arrive for windows that do not change the dock.
+// Keep the existing array when its visible content is identical so Framer
+// Motion does not restart dock layout work on every notification.
+function sameRunningApps(left: AppInfo[], right: AppInfo[]): boolean {
+	return (
+		left.length === right.length &&
+		left.every((app, index) => {
+			const next = right[index];
+			return (
+				app.name === next.name &&
+				app.path === next.path &&
+				app.icon === next.icon &&
+				app.is_running === next.is_running &&
+				app.is_background === next.is_background &&
+				app.hwnd === next.hwnd &&
+				app.executable === next.executable &&
+				(app.tray_ids?.join("\0") ?? "") === (next.tray_ids?.join("\0") ?? "") &&
+				JSON.stringify(app.all_hwnds ?? []) === JSON.stringify(next.all_hwnds ?? [])
+			);
+		})
+	);
+}
+
 // Fuzzy identity: a running window and its installed/pinned entry often carry
 // different paths (exe vs .lnk vs AUMID), so exact keys miss and the same app
 // looks pinnable twice. Mirrors the dock list's own pinned↔running matching.
@@ -171,6 +194,7 @@ const Dock = memo(function Dock() {
 	const [isOverlapped, setIsOverlapped] = useState(false);
 	const [isVisible, setIsVisible] = useState(true);
 	const [showAddPopup, setShowAddPopup] = useState(false);
+	const [nativeMenuOpen, setNativeMenuOpen] = useState(false);
 	const [contextMenu, setContextMenu] = useState<{
 		x: number;
 		y: number;
@@ -225,7 +249,7 @@ const Dock = memo(function Dock() {
 
 	const isCurrentlyHovered = isDockHovered || isEdgeHovered;
 	const [interactionState, setInteractionState] = useState<"active" | "grace" | "none">("none");
-	const isAnyInteraction = isCurrentlyHovered || !!contextMenu || showAddPopup;
+	const isAnyInteraction = isCurrentlyHovered || !!contextMenu || showAddPopup || nativeMenuOpen;
 
 	const previewTimerRef = useRef<any>(null);
 	const isPreviewHoveredRef = useRef(false);
@@ -502,10 +526,17 @@ const Dock = memo(function Dock() {
 		const poll = async () => {
 			if (isDragging) return;
 			const seq = ++pollSeq;
-			const [windows, tray] = await Promise.all([
-				invoke<AppInfo[]>("get_active_windows"),
-				invoke<TrayApp[]>("get_tray_apps").catch(() => [])
-			]);
+			let windows: AppInfo[];
+			let tray: TrayApp[];
+			try {
+				[windows, tray] = await Promise.all([
+					invoke<AppInfo[]>("get_active_windows"),
+					invoke<TrayApp[]>("get_tray_apps").catch(() => [])
+				]);
+			} catch (error) {
+				console.error("Failed to refresh dock apps:", error);
+				return;
+			}
 			// Ignore responses that arrive out of order: an older poll must never
 			// overwrite a newer state, which would resurrect closed apps.
 			if (stopped || seq !== pollSeq) return;
@@ -526,13 +557,16 @@ const Dock = memo(function Dock() {
 			// reachable without hunting for it in the overflow. With the setting
 			// off the dock follows the Windows taskbar and shows only real windows.
 			const running = dockShowTrayApps ? mergeTrayApps(windows, selected.visible) : windows;
-			setActiveApps(running);
+			setActiveApps((prev) => (sameRunningApps(prev, running) ? prev : running));
 
 			setActiveOrder((prev) => {
 				const newPaths = running.map((r) => appIdentity(r.path, r.executable, r.name));
 				const existingPaths = prev.filter((p) => newPaths.includes(p));
 				const addedPaths = newPaths.filter((p) => !prev.includes(p));
-				return [...existingPaths, ...addedPaths];
+				const next = [...existingPaths, ...addedPaths];
+				return next.length === prev.length && next.every((path, i) => path === prev[i])
+					? prev
+					: next;
 			});
 
 			running.forEach((app) => fetchIcon(app.path, app.name, app.hwnd));
@@ -672,7 +706,7 @@ const Dock = memo(function Dock() {
 				// Several windows: bring the most recent forward, then cycle.
 				await invoke("focus_app_windows", { hwnds: app.all_hwnds.map(([hwnd]) => hwnd) });
 			} else if (app.hwnd) {
-				await invoke("focus_window", { hwnd: app.hwnd, explicitWindow: false });
+				await invoke("focus_window", { hwnd: app.hwnd });
 			} else {
 				await invoke("open_app", { appName: app.path });
 			}
@@ -726,12 +760,15 @@ const Dock = memo(function Dock() {
 	};
 
 	const openTrayMenu = async (trayId: string) => {
+		setNativeMenuOpen(true);
 		closeMenu();
 		setPreviewData(null);
 		try {
 			await invoke("show_tray_context_menu", { trayId });
 		} catch (error) {
 			showActionError(error);
+		} finally {
+			setNativeMenuOpen(false);
 		}
 	};
 
@@ -1351,8 +1388,7 @@ const Dock = memo(function Dock() {
 																			className="preview-item"
 																			onClick={() =>
 																				invoke("focus_window", {
-																					hwnd: prev.hwnd,
-																					explicitWindow: true
+																					hwnd: prev.hwnd
 																				})
 																			}
 																		>
@@ -1521,8 +1557,7 @@ const Dock = memo(function Dock() {
 																	className="preview-item"
 																	onClick={() =>
 																		invoke("focus_window", {
-																			hwnd: prev.hwnd,
-																			explicitWindow: true
+																			hwnd: prev.hwnd
 																		})
 																	}
 																>

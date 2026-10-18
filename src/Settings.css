@@ -217,6 +217,32 @@ body {
 	-webkit-app-region: no-drag;
 }
 
+.settings-save-error {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	margin-bottom: 12px;
+	padding: 10px 12px;
+	border: 1px solid rgba(239, 96, 96, 0.45);
+	border-radius: 10px;
+	background: rgba(239, 96, 96, 0.12);
+	color: var(--text-color, white);
+	font-size: 12px;
+	line-height: 1.4;
+}
+
+.settings-save-error button {
+	display: grid;
+	place-items: center;
+	flex-shrink: 0;
+	padding: 2px;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+}
+
 /* Announcement banner (published via website/announcements.json) */
 .announcement-banner {
 	display: flex;

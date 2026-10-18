@@ -719,9 +719,13 @@ function App() {
 	const musicBubbleRef = useRef<HTMLButtonElement>(null);
 	const shelfBubbleRef = useRef<HTMLButtonElement>(null);
 	const reportNotchRect = useRef<() => void>(() => {});
-	const dockEnabledInitial = useRef(true);
-	const dockModeInitial = useRef(true);
-	const notchModeInitial = useRef(true);
+	const [systemSettingsReady, setSystemSettingsReady] = useState(false);
+	const [waitForStartupSplash, setWaitForStartupSplash] = useState(false);
+	const initialSystemSyncDone = useRef(false);
+	const splashDone = useRef(false);
+	const systemSyncQueue = useRef<Promise<void>>(Promise.resolve());
+	const appliedDock = useRef<{ enabled: boolean; mode: string } | null>(null);
+	const appliedNotchMode = useRef<string | null>(null);
 
 	const isAnyInteraction = isHovered || isNotchHovered || isEdgeHovered;
 	const isHidden =
@@ -978,10 +982,12 @@ function App() {
 
 	useEffect(() => {
 		if (!windowLabel) return;
+		let cancelled = false;
 
 		invoke("load_settings")
 			.then(async (settings: any) => {
 				if (await reloadIfMirrorWasStale(settings)) return;
+				if (cancelled) return;
 				const getVal = (key: string, fallback: string | null = null) => {
 					const val = settings[key];
 					if (val !== undefined && val !== null) return String(val);
@@ -1033,63 +1039,20 @@ function App() {
 					}
 					const rawDockMode = getVal("bloom-dock-mode", "smart") as string;
 					const dockMode = rawDockMode === "auto-hide" ? "smart" : rawDockMode;
-					const syncWindows = async () => {
-						const dockEnabled = getVal("bloom-dock-enabled", "true") === "true";
-						if (dockEnabled) {
-							await invoke("init_dock", { mode: dockMode });
-						} else {
-							await invoke("toggle_dock", { enable: false });
-						}
-						await invoke("change_notch_mode", { mode: nMode });
-						await invoke("sync_appbar");
-					};
-
-					const dockEnabled = getVal("bloom-dock-enabled", "true") === "true";
-					const runDockInit = () => {
-						// 1. Snappy initial sync
-						setTimeout(syncWindows, 400);
-						// 2. Safety-net dock retry
-						if (dockEnabled) {
-							setTimeout(() => invoke("init_dock", { mode: dockMode }).catch(() => {}), 1500);
-						}
-						// 3. Layout corrections
-						setTimeout(() => invoke("sync_appbar"), 1000);
-						setTimeout(() => invoke("sync_appbar"), 2500);
-						setTimeout(() => invoke("sync_appbar"), 5000);
-					};
-
-					// Mirror Overlay.tsx's splash decision for dock init too — only wait when
-					// a splash is actually coming, otherwise init immediately.
-					const runDockInitAfterSplash = () => {
-						let dockStarted = false;
-						const unlistenDock = listen("splash-done", () => {
-							if (dockStarted) return;
-							dockStarted = true;
-							runDockInit();
-							unlistenDock.then((fn) => fn());
-						});
-						setTimeout(() => {
-							if (dockStarted) return;
-							dockStarted = true;
-							runDockInit();
-							unlistenDock.then((fn) => fn());
-						}, 6000);
-					};
-
+					setDockMode(dockMode);
+					setDockEnabled(getVal("bloom-dock-enabled", "true") === "true");
 					const storedVersion = localStorage.getItem("bloom-app-version");
-					if (firstRun || storedVersion === null) {
-						runDockInitAfterSplash();
-					} else {
-						getVersion()
-							.then((currentVersion) => {
-								if (storedVersion !== currentVersion) {
-									runDockInitAfterSplash();
-								} else {
-									runDockInit();
-								}
-							})
-							.catch(() => runDockInit());
+					let waitForSplash = firstRun || storedVersion === null;
+					if (!waitForSplash) {
+						try {
+							waitForSplash = storedVersion !== (await getVersion());
+						} catch {
+							// Version lookup is optional; continue startup without a splash.
+						}
 					}
+					if (cancelled) return;
+					setWaitForStartupSplash(waitForSplash);
+					setSystemSettingsReady(true);
 				}
 
 				const scaleVal = getVal("bloom-scale");
@@ -1105,7 +1068,13 @@ function App() {
 					} catch {}
 				}
 			})
-			.catch(console.error);
+			.catch((error) => {
+				console.error(error);
+				if (!cancelled && windowLabel === "main") setSystemSettingsReady(true);
+			});
+		return () => {
+			cancelled = true;
+		};
 	}, [windowLabel]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	useEffect(() => {
@@ -1180,41 +1149,97 @@ function App() {
 		[windowLabel]
 	);
 
-	// Side effects: dock-enabled (skip first render — startup code handles initial state)
+	// One owner applies the latest window settings. Superseded splash timers and
+	// retries are cancelled; an in-flight command finishes before the new state
+	// is applied, so an old startup retry cannot overwrite a user change.
 	useEffect(() => {
-		if (windowLabel !== "main") return;
-		if (dockEnabledInitial.current) {
-			dockEnabledInitial.current = false;
-			return;
-		}
-		if (dockEnabled) {
-			invoke("init_dock", { mode: localStorage.getItem("bloom-dock-mode") || "smart" });
+		if (windowLabel !== "main" || !systemSettingsReady) return;
+
+		let cancelled = false;
+		let started = false;
+		let attempts = 0;
+		let startTimer: number | undefined;
+		let splashTimer: number | undefined;
+		let retryTimer: number | undefined;
+		let settleTimer: number | undefined;
+		let unlistenSplash: (() => void) | undefined;
+
+		const reconcile = () => {
+			systemSyncQueue.current = systemSyncQueue.current
+				.catch(() => {})
+				.then(async () => {
+					if (cancelled) return;
+					try {
+						if (dockEnabled) {
+							if (!appliedDock.current?.enabled) {
+								await invoke("init_dock", { mode: dockMode });
+								appliedDock.current = { enabled: true, mode: dockMode };
+							} else if (appliedDock.current.mode !== dockMode) {
+								await invoke("change_dock_mode", { mode: dockMode });
+								appliedDock.current = { enabled: true, mode: dockMode };
+							}
+						} else if (appliedDock.current?.enabled !== false) {
+							await invoke("toggle_dock", { enable: false });
+							appliedDock.current = { enabled: false, mode: dockMode };
+						}
+						if (cancelled) return;
+						if (appliedNotchMode.current !== notchMode) {
+							await invoke("change_notch_mode", { mode: notchMode });
+							appliedNotchMode.current = notchMode;
+						}
+						if (cancelled) return;
+						await invoke("sync_appbar");
+						if (cancelled) return;
+						const wasInitialSync = !initialSystemSyncDone.current;
+						initialSystemSyncDone.current = true;
+						if (wasInitialSync) {
+							settleTimer = window.setTimeout(() => {
+								if (!cancelled) {
+									systemSyncQueue.current = systemSyncQueue.current
+										.catch(() => {})
+										.then(() => invoke<void>("sync_appbar"))
+										.catch((error) => console.error("AppBar settle failed", error));
+								}
+							}, 1000);
+						}
+					} catch (error) {
+						console.error("Window reconciliation failed", error);
+						if (!cancelled && attempts++ < 1) {
+							retryTimer = window.setTimeout(reconcile, 1000);
+						}
+					}
+				});
+		};
+
+		const start = () => {
+			if (cancelled || started) return;
+			started = true;
+			splashDone.current = true;
+			if (splashTimer !== undefined) window.clearTimeout(splashTimer);
+			unlistenSplash?.();
+			startTimer = window.setTimeout(reconcile, initialSystemSyncDone.current ? 0 : 400);
+		};
+
+		if (waitForStartupSplash && !splashDone.current && !initialSystemSyncDone.current) {
+			void listen("splash-done", start)
+				.then((unlisten) => {
+					if (cancelled || started) unlisten();
+					else unlistenSplash = unlisten;
+				})
+				.catch(() => start());
+			splashTimer = window.setTimeout(start, 6000);
 		} else {
-			invoke("toggle_dock", { enable: false });
+			start();
 		}
-		setTimeout(() => invoke("sync_appbar"), 200);
-	}, [dockEnabled, windowLabel]);
 
-	// Side effects: dock-mode (skip first render)
-	useEffect(() => {
-		if (windowLabel !== "main") return;
-		if (dockModeInitial.current) {
-			dockModeInitial.current = false;
-			return;
-		}
-		invoke("change_dock_mode", { mode: dockMode });
-		setTimeout(() => invoke("sync_appbar"), 200);
-	}, [dockMode, windowLabel]);
-
-	// Side effects: notch-mode (skip first render)
-	useEffect(() => {
-		if (windowLabel !== "main") return;
-		if (notchModeInitial.current) {
-			notchModeInitial.current = false;
-			return;
-		}
-		invoke("change_notch_mode", { mode: notchMode });
-	}, [notchMode, windowLabel]);
+		return () => {
+			cancelled = true;
+			for (const timer of [startTimer, splashTimer, retryTimer, settleTimer]) {
+				if (timer !== undefined) window.clearTimeout(timer);
+			}
+			unlistenSplash?.();
+		};
+	}, [windowLabel, systemSettingsReady, waitForStartupSplash, dockEnabled, dockMode, notchMode]);
 
 	// Bloom mode state: 'music', 'calendar', 'command-center', 'announcement', 'shelf', or 'status'
 	const [bloomMode, setBloomMode] = useState<BloomMode>("status");

@@ -98,6 +98,14 @@ function SettingsApp() {
 				</div>
 
 				<div className="settings-content">
+					{settings.saveError && (
+						<div className="settings-save-error" role="alert">
+							<span>Changes could not be saved. Your saved settings have been restored.</span>
+							<button onClick={settings.dismissSaveError} aria-label="Dismiss save error">
+								<X size={14} strokeWidth={2} />
+							</button>
+						</div>
+					)}
 					{announcement && !dismissed && (
 						<div className={`announcement-banner severity-${announcement.severity}`}>
 							<Megaphone size={14} className="announcement-banner-icon" />

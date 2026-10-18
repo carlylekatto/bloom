@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
@@ -15,16 +15,16 @@ import {
 } from "../dockExtras";
 import type { WidgetConfig } from "./types";
 
-function saveSetting(key: string, value: string) {
-	localStorage.setItem(key, value);
-	invoke("save_setting", { key, value }).catch(console.error);
-}
-
 function readBool(val: string | null): boolean {
 	return val === "true";
 }
 
 export function useSettings() {
+	const [saveError, setSaveError] = useState(
+		() => sessionStorage.getItem("bloom-settings-save-error") !== null
+	);
+	const saveQueue = useRef<Promise<void>>(Promise.resolve());
+	const saveFailed = useRef(false);
 	const [autostart, setAutostart] = useState(false);
 	const [weatherEnabled, setWeatherEnabled] = useState(true);
 	const [calendarEnabled, setCalendarEnabled] = useState(true);
@@ -258,6 +258,71 @@ export function useSettings() {
 			console.error("Failed to load settings:", e);
 		}
 	}, []);
+
+	// The file write is authoritative. Serialize controls that change several
+	// settings, and update the local mirror only after the backend confirms the
+	// write. A failed save reloads the page from persisted values and leaves a
+	// visible error instead of keeping an optimistic control value on screen.
+	const saveSetting = (key: string, value: string | null): Promise<boolean> => {
+		const operation = saveQueue.current.then(async () => {
+			if (saveFailed.current) return false;
+			try {
+				await invoke<void>("save_setting", { key, value });
+			} catch (error) {
+				console.error(`Failed to save ${key}:`, error);
+				saveFailed.current = true;
+				sessionStorage.setItem("bloom-settings-save-error", "true");
+				setSaveError(true);
+				window.setTimeout(() => window.location.reload(), 0);
+				return false;
+			}
+			try {
+				if (value === null) localStorage.removeItem(key);
+				else localStorage.setItem(key, value);
+				sessionStorage.removeItem("bloom-settings-save-error");
+			} catch (error) {
+				// The file is saved; a mirror failure must not be reported as a failed write.
+				console.warn("Settings mirror update failed:", error);
+			}
+			setSaveError(false);
+			return true;
+		});
+		saveQueue.current = operation.then(() => {});
+		return operation;
+	};
+
+	// Coordinates only need the backend settings file. Keep them out of the
+	// browser's localStorage mirror while preserving the same queued/error path.
+	const saveLocation = (key: "bloom-weather-lat" | "bloom-weather-lon", value: string | null): Promise<boolean> => {
+		const operation = saveQueue.current.then(async () => {
+			if (saveFailed.current) return false;
+			try {
+				await invoke<void>("save_setting", { key, value });
+			} catch (error) {
+				console.error(`Failed to save ${key}:`, error);
+				saveFailed.current = true;
+				sessionStorage.setItem("bloom-settings-save-error", "true");
+				setSaveError(true);
+				window.setTimeout(() => window.location.reload(), 0);
+				return false;
+			}
+			try {
+				localStorage.removeItem(key);
+				sessionStorage.removeItem("bloom-settings-save-error");
+			} catch (error) {
+				console.warn("Settings mirror cleanup failed:", error);
+			}
+			setSaveError(false);
+			return true;
+		});
+		saveQueue.current = operation.then(() => {});
+		return operation;
+	};
+
+	const dismissSaveError = () => {
+		sessionStorage.removeItem("bloom-settings-save-error");
+		setSaveError(false);
+	};
 
 	// ── Initialize on mount ──
 	useEffect(() => {
@@ -752,32 +817,22 @@ export function useSettings() {
 		setCityName(city.name);
 		setShowCityDropdown(false);
 		setCitySearchResults([]);
-		localStorage.setItem("bloom-weather-city", city.name);
-		localStorage.setItem("bloom-weather-lat", city.latitude.toString());
-		localStorage.setItem("bloom-weather-lon", city.longitude.toString());
-		await invoke("save_setting", {
-			key: "bloom-weather-lat",
-			value: city.latitude.toString()
-		}).catch(() => {});
-		await invoke("save_setting", {
-			key: "bloom-weather-lon",
-			value: city.longitude.toString()
-		}).catch(() => {});
-		await invoke("save_setting", { key: "bloom-weather-city", value: city.name }).catch(() => {});
-		emit("weather-refresh", { lat: city.latitude, lon: city.longitude });
+		const saved =
+			(await saveLocation("bloom-weather-lat", city.latitude.toString())) &&
+			(await saveLocation("bloom-weather-lon", city.longitude.toString())) &&
+			(await saveSetting("bloom-weather-city", city.name));
+		if (saved) emit("weather-refresh", { lat: city.latitude, lon: city.longitude });
 	};
 
 	const handleCityClear = async () => {
 		setCityName("");
 		setShowCityDropdown(false);
 		setCitySearchResults([]);
-		localStorage.removeItem("bloom-weather-city");
-		localStorage.removeItem("bloom-weather-lat");
-		localStorage.removeItem("bloom-weather-lon");
-		await invoke("save_setting", { key: "bloom-weather-lat", value: null }).catch(() => {});
-		await invoke("save_setting", { key: "bloom-weather-lon", value: null }).catch(() => {});
-		await invoke("save_setting", { key: "bloom-weather-city", value: null }).catch(() => {});
-		emit("weather-refresh", true);
+		const saved =
+			(await saveLocation("bloom-weather-lat", null)) &&
+			(await saveLocation("bloom-weather-lon", null)) &&
+			(await saveSetting("bloom-weather-city", null));
+		if (saved) emit("weather-refresh", true);
 	};
 
 	// ── Reset to defaults ──
@@ -866,6 +921,8 @@ export function useSettings() {
 	};
 
 	return {
+		saveError,
+		dismissSaveError,
 		// System
 		autostart,
 		toggleAutostart,

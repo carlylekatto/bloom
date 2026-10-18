@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { motion } from "framer-motion";
+import { useMouseSliderDrag } from "../hooks/useMouseSliderDrag";
 import "./AudioMixer.css";
 
 export interface AudioSession {
@@ -93,17 +94,13 @@ function MixerTile({
 		onVolumeChange(session.pid, Math.max(0, Math.min(1, relativeY / rect.height)));
 	};
 
+	const startDrag = useMouseSliderDrag(volumeFromY, () => {
+		draggingRef.current = null;
+	});
+
 	const handleMouseDown = (e: React.MouseEvent) => {
+		startDrag(e.clientY);
 		draggingRef.current = session.pid;
-		volumeFromY(e.clientY);
-		const handleMouseMove = (moveE: MouseEvent) => volumeFromY(moveE.clientY);
-		const handleMouseUp = () => {
-			draggingRef.current = null;
-			document.removeEventListener("mousemove", handleMouseMove);
-			document.removeEventListener("mouseup", handleMouseUp);
-		};
-		document.addEventListener("mousemove", handleMouseMove);
-		document.addEventListener("mouseup", handleMouseUp);
 	};
 
 	return (
@@ -298,7 +295,9 @@ export function AudioMixer({
 		>
 			<div
 				className={`volume-mixer-list${layout === "scroll" ? " volume-mixer-list-scroll" : ""}`}
-				style={layout === "wrap" ? { gridTemplateColumns: `repeat(${mixerColumns}, 1fr)` } : undefined}
+				style={
+					layout === "wrap" ? { gridTemplateColumns: `repeat(${mixerColumns}, 1fr)` } : undefined
+				}
 				onWheel={
 					layout === "scroll"
 						? (e) => {
@@ -317,7 +316,11 @@ export function AudioMixer({
 			>
 				{sessions.length === 0 ? (
 					<div className="volume-mixer-empty">
-						{!sessionsLoaded ? "Loading..." : sessionsError ? "Couldn't read audio sessions" : "No apps with audio"}
+						{!sessionsLoaded
+							? "Loading..."
+							: sessionsError
+								? "Couldn't read audio sessions"
+								: "No apps with audio"}
 					</div>
 				) : (
 					sessions.map((session) => (

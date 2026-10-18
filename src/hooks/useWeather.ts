@@ -123,11 +123,11 @@ async function fetchWeatherForCoords(
 }
 
 async function resolveLocation(): Promise<ResolvedLocation> {
-	// 1. Check saved coordinates from settings or localStorage
+	// 1. Check saved coordinates from the backend settings file.
 	try {
 		const settings = (await invoke("load_settings").catch(() => ({}))) as Record<string, any>;
-		const savedLat = settings["bloom-weather-lat"] || localStorage.getItem("bloom-weather-lat");
-		const savedLon = settings["bloom-weather-lon"] || localStorage.getItem("bloom-weather-lon");
+		const savedLat = settings["bloom-weather-lat"];
+		const savedLon = settings["bloom-weather-lon"];
 		const savedCity = settings["bloom-weather-city"] || localStorage.getItem("bloom-weather-city");
 
 		if (savedLat && savedLon) {

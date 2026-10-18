@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::mpsc::{channel, sync_channel, Sender, SyncSender};
 use std::sync::{
-    atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicIsize, AtomicU8, Ordering},
+    atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicIsize, AtomicU32, AtomicU8, Ordering},
     Mutex, OnceLock,
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -324,42 +324,57 @@ unsafe extern "system" fn window_change_event_proc(
         return;
     }
 
+    // WinEvent reports child controls under a valid parent HWND too. Their
+    // create/show/hide activity is not an app-window change and can otherwise
+    // queue hundreds of dock rescans during slider interaction.
+    if id_object != 0 || id_child != 0 {
+        return;
+    }
+
     // A top-level window appeared/disappeared (or focus moved): capture UI
     // state may have changed. Cheap flag; the worker thread does the scan.
     {
         use windows::Win32::UI::WindowsAndMessaging::{
             EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_SHOW,
         };
-        if id_object == 0
-            && id_child == 0
-            && (event == EVENT_OBJECT_SHOW
-                || event == EVENT_OBJECT_HIDE
-                || event == EVENT_OBJECT_DESTROY)
+        if event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_HIDE || event == EVENT_OBJECT_DESTROY
         {
             CAPTURE_RECHECK.store(true, Ordering::Relaxed);
         }
     }
 
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongW, GetWindowThreadProcessId, IsWindow, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
+        GetClassNameA, GetWindowLongW, GetWindowThreadProcessId, IsWindow, GWL_EXSTYLE,
+        WS_EX_TOOLWINDOW,
     };
 
     if !IsWindow(Some(hwnd)).as_bool() {
-        return;
-    }
+        // A destroyed window is no longer queryable, but the dock still needs
+        // to remove its app. Other notifications with an invalid HWND are stale.
+        if event != windows::Win32::UI::WindowsAndMessaging::EVENT_OBJECT_DESTROY {
+            return;
+        }
+    } else {
+        // Windows recreates its native volume/brightness flyout during slider
+        // changes. It is not a taskbar app.
+        let mut class_name = [0u8; 256];
+        let len = GetClassNameA(hwnd, &mut class_name);
+        if &class_name[..len as usize] == b"NativeHWNDHost"
+            || &class_name[..len as usize] == b"#32768"
+        {
+            return;
+        }
 
-    // Skip tool windows (docks, trays, etc.)
-    let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-    if (ex_style & WS_EX_TOOLWINDOW.0) != 0 {
-        return;
-    }
-
-    // Skip our own process
-    let my_pid = std::process::id();
-    let mut pid = 0u32;
-    GetWindowThreadProcessId(hwnd, Some(&mut pid));
-    if pid == my_pid {
-        return;
+        // Skip tool windows (docks, trays, etc.) and our own process.
+        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+        if (ex_style & WS_EX_TOOLWINDOW.0) != 0 {
+            return;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid == std::process::id() {
+            return;
+        }
     }
 
     // Debounce bursts: closing a window (especially a UWP app) emits several
@@ -494,16 +509,52 @@ unsafe extern "system" fn focus_event_proc(
         let _guard = ThumbnailCaptureGuard;
 
         if let Some(img) = crate::utils::capture_hwnd_to_base64(hwnd, 320, 200) {
-            if let Some(cache) = crate::state::THUMBNAIL_CACHE.get() {
-                if let Ok(mut guard) = cache.lock() {
-                    guard.insert(hwnd_raw, (img, crate::utils::get_now_ms()));
-                }
-            }
+            cache_thumbnail(hwnd_raw, img);
         }
     });
 }
 
 static THUMB_CAPTURE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+const MAX_CACHED_THUMBNAILS: usize = 15;
+
+fn trim_thumbnail_cache(
+    cache: &mut std::collections::HashMap<isize, (String, i64)>,
+    newest: isize,
+    is_live: impl Fn(isize) -> bool,
+) {
+    cache.retain(|&key, _| is_live(key));
+    while cache.len() > MAX_CACHED_THUMBNAILS {
+        let oldest = cache
+            .iter()
+            .filter(|(key, _)| **key != newest)
+            .min_by_key(|(_, (_, timestamp))| *timestamp)
+            .map(|(key, _)| *key);
+        if let Some(key) = oldest {
+            cache.remove(&key);
+        } else {
+            break;
+        }
+    }
+}
+
+pub fn cache_thumbnail(hwnd: isize, image: String) {
+    let Some(cache) = crate::state::THUMBNAIL_CACHE.get() else {
+        return;
+    };
+    let Ok(mut guard) = cache.lock() else {
+        return;
+    };
+    guard.insert(hwnd, (image, crate::utils::get_now_ms()));
+    if guard.len() <= MAX_CACHED_THUMBNAILS {
+        return;
+    }
+
+    use windows::Win32::UI::WindowsAndMessaging::IsWindow;
+    trim_thumbnail_cache(&mut guard, hwnd, |key| unsafe {
+        IsWindow(Some(HWND(key as *mut _))).as_bool()
+    });
+}
 
 struct ThumbnailCaptureGuard;
 
@@ -589,16 +640,7 @@ unsafe extern "system" fn thumbnail_capture_proc(
 
         let hwnd = HWND(hwnd_raw as *mut _);
         if let Some(img) = crate::utils::capture_hwnd_to_base64(hwnd, 320, 200) {
-            if let Some(cache) = crate::state::THUMBNAIL_CACHE.get() {
-                if let Ok(mut guard) = cache.lock() {
-                    guard.insert(hwnd_raw, (img, crate::utils::get_now_ms()));
-                    if guard.len() > 15 {
-                        use windows::Win32::UI::WindowsAndMessaging::IsWindow;
-                        guard
-                            .retain(|&k, _| unsafe { IsWindow(Some(HWND(k as *mut _))).as_bool() });
-                    }
-                }
-            }
+            cache_thumbnail(hwnd_raw, img);
         }
     });
 }
@@ -1324,8 +1366,8 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
         use windows::Win32::Foundation::{POINT, RECT};
         use windows::Win32::Graphics::Gdi::ClientToScreen;
         use windows::Win32::UI::WindowsAndMessaging::{
-            GetClientRect, GetForegroundWindow, GetWindowLongW, GetWindowRect, IsIconic, IsZoomed,
-            GWL_STYLE, WS_CAPTION, WS_MAXIMIZE,
+            GetClientRect, GetForegroundWindow, GetWindowLongW, GetWindowRect, IsIconic, IsWindow,
+            IsZoomed, GWL_STYLE, WS_CAPTION, WS_MAXIMIZE,
         };
         let mut last_visible = true;
         let mut last_dock_overlap: Option<bool> = None;
@@ -1360,6 +1402,36 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
                 };
                 let mut hwnd = GetForegroundWindow();
 
+                // Bloom's HUD and menus can briefly become the foreground
+                // window while the user drags a control or right-clicks the
+                // dock. Walking the Z-order from that window may select a
+                // different app on every tick, making the smart dock flash.
+                // Keep evaluating the last real foreground window until an
+                // external app actually takes focus. Native popup menus use
+                // the #32768 class and need the same treatment.
+                let mut foreground_pid = 0u32;
+                if !hwnd.is_invalid() {
+                    GetWindowThreadProcessId(hwnd, Some(&mut foreground_pid));
+                }
+                let mut foreground_class = [0u8; 256];
+                let foreground_class_len = if hwnd.is_invalid() {
+                    0
+                } else {
+                    windows::Win32::UI::WindowsAndMessaging::GetClassNameA(
+                        hwnd,
+                        &mut foreground_class,
+                    )
+                };
+                let is_popup_menu = &foreground_class[..foreground_class_len as usize] == b"#32768";
+                if (foreground_pid == my_process_id || is_popup_menu)
+                    && !last_hwnd.is_invalid()
+                    && IsWindow(Some(last_hwnd)).as_bool()
+                    && IsWindowVisible(last_hwnd).as_bool()
+                    && !IsIconic(last_hwnd).as_bool()
+                {
+                    hwnd = last_hwnd;
+                }
+
                 // Find the first meaningful window for overlap detection.
                 // We skip Bloom windows, invisible windows, minimized windows, and 'cloaked' system ghosts.
                 let mut check_count = 0;
@@ -1375,6 +1447,7 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
                     let class_str = std::str::from_utf8(&class_name[..len as usize]).unwrap_or("");
 
                     let is_bloom = process_id == my_process_id || class_str.contains("Bloom");
+                    let is_popup_menu = class_str == "#32768";
                     let is_visible = IsWindowVisible(hwnd).as_bool();
                     let is_iconic = IsIconic(hwnd).as_bool();
 
@@ -1393,7 +1466,13 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
                         && (rect.right - rect.left) > 0
                         && (rect.bottom - rect.top) > 0;
 
-                    if is_bloom || !is_visible || is_iconic || is_cloaked || !has_valid_rect {
+                    if is_bloom
+                        || is_popup_menu
+                        || !is_visible
+                        || is_iconic
+                        || is_cloaked
+                        || !has_valid_rect
+                    {
                         hwnd = windows::Win32::UI::WindowsAndMessaging::GetWindow(
                             hwnd,
                             windows::Win32::UI::WindowsAndMessaging::GW_HWNDNEXT,
@@ -1632,31 +1711,10 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
                 }
 
                 // Enforce native taskbar hiding (periodic check)
-                if NATIVE_TASKBAR_HIDDEN.load(Ordering::Relaxed) {
-                    use windows::Win32::UI::WindowsAndMessaging::{FindWindowA, IsWindowVisible};
-                    let tray_class = windows::core::PCSTR(c"Shell_TrayWnd".as_ptr() as *const u8);
-                    let secondary_tray_class =
-                        windows::core::PCSTR(c"Shell_SecondaryTrayWnd".as_ptr() as *const u8);
-
-                    let mut should_rehide = false;
-                    if let Ok(tray_hwnd) = FindWindowA(tray_class, windows::core::PCSTR::null()) {
-                        if IsWindowVisible(tray_hwnd).as_bool() {
-                            should_rehide = true;
-                        }
-                    }
-                    if !should_rehide {
-                        if let Ok(secondary_tray_hwnd) =
-                            FindWindowA(secondary_tray_class, windows::core::PCSTR::null())
-                        {
-                            if IsWindowVisible(secondary_tray_hwnd).as_bool() {
-                                should_rehide = true;
-                            }
-                        }
-                    }
-
-                    if should_rehide {
-                        set_taskbar_visibility(false, false);
-                    }
+                if NATIVE_TASKBAR_HIDDEN.load(Ordering::Relaxed)
+                    && (refresh_taskbar_owner() || any_native_taskbar_visible())
+                {
+                    set_taskbar_visibility(false, false);
                 }
             }
 
@@ -3440,7 +3498,7 @@ pub fn register_appbar(window: tauri::WebviewWindow) {
         unsafe {
             use windows::Win32::Foundation::RECT;
             use windows::Win32::UI::Shell::{
-                SHAppBarMessage, ABE_TOP, ABM_NEW, ABM_QUERYPOS, ABM_SETPOS, APPBARDATA,
+                SHAppBarMessage, ABE_TOP, ABM_NEW, ABM_QUERYPOS, ABM_REMOVE, ABM_SETPOS, APPBARDATA,
             };
             use windows::Win32::UI::WindowsAndMessaging::{
                 GetWindowLongPtrW, GetWindowRect, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE,
@@ -3456,11 +3514,16 @@ pub fn register_appbar(window: tauri::WebviewWindow) {
             let mut abd = APPBARDATA {
                 cbSize: std::mem::size_of::<APPBARDATA>() as u32,
                 hWnd: hwnd,
+                uCallbackMessage: 0x8041, // WM_APP + 0x41, reserved for the notch AppBar
                 ..Default::default()
             };
 
             if !MAIN_APPBAR_REGISTERED.load(Ordering::Relaxed) {
-                SHAppBarMessage(ABM_NEW, &mut abd);
+                let _ = SHAppBarMessage(ABM_REMOVE, &mut abd);
+                if SHAppBarMessage(ABM_NEW, &mut abd) == 0 {
+                    eprintln!("Bloom: notch AppBar registration failed");
+                    return;
+                }
                 MAIN_APPBAR_REGISTERED.store(true, Ordering::Relaxed);
             }
 
@@ -3645,7 +3708,8 @@ fn register_dock_appbar_inner(window: tauri::WebviewWindow, attempt: i32) {
         unsafe {
             use windows::Win32::Foundation::RECT;
             use windows::Win32::UI::Shell::{
-                SHAppBarMessage, ABE_BOTTOM, ABM_NEW, ABM_QUERYPOS, ABM_SETPOS, APPBARDATA,
+                SHAppBarMessage, ABE_BOTTOM, ABM_NEW, ABM_QUERYPOS, ABM_REMOVE, ABM_SETPOS,
+                APPBARDATA,
             };
             use windows::Win32::UI::WindowsAndMessaging::{
                 GetWindowLongPtrW, GetWindowRect, RegisterWindowMessageW, SetWindowLongPtrW,
@@ -3670,7 +3734,9 @@ fn register_dock_appbar_inner(window: tauri::WebviewWindow, attempt: i32) {
             };
 
             if !DOCK_APPBAR_REGISTERED.load(Ordering::Relaxed) {
+                let _ = SHAppBarMessage(ABM_REMOVE, &mut abd);
                 if SHAppBarMessage(ABM_NEW, &mut abd) == 0 {
+                    eprintln!("Bloom: dock AppBar registration failed");
                     return;
                 }
                 DOCK_APPBAR_REGISTERED.store(true, Ordering::Relaxed);
@@ -3997,7 +4063,7 @@ fn reposition_all_windows(app_handle: &AppHandle) {
     // a dock that the user had previously disabled.
     if crate::utils::dock_enabled() {
         if let Some(dock_win) = app_handle.get_webview_window("dock") {
-            if DOCK_APPBAR_REGISTERED.load(Ordering::Relaxed) {
+            if get_setting_str(app_handle, "bloom-dock-mode").as_deref() == Some("fixed") {
                 register_dock_appbar(dock_win);
             } else {
                 // Auto-hide mode: reposition dock at bottom of screen
@@ -4080,12 +4146,18 @@ fn reposition_autohide_dock(app_handle: &AppHandle, dock_win: tauri::WebviewWind
     });
 }
 
+static TASKBAR_CREATED_MESSAGE: AtomicU32 = AtomicU32::new(0);
+
 pub fn setup_display_change_monitor(app_handle: AppHandle) {
     let _ = crate::state::DISPLAY_MONITOR_HANDLE.set(app_handle);
 
     std::thread::spawn(|| unsafe {
         use windows::Win32::System::LibraryLoader::GetModuleHandleW;
         use windows::Win32::UI::WindowsAndMessaging::*;
+
+        let taskbar_created =
+            RegisterWindowMessageA(windows::core::PCSTR(c"TaskbarCreated".as_ptr() as *const u8));
+        TASKBAR_CREATED_MESSAGE.store(taskbar_created, Ordering::Relaxed);
 
         let class_name = windows::core::PCSTR(c"BloomDisplayMonitor".as_ptr() as *const u8);
         let h_inst = GetModuleHandleW(None).unwrap_or_default().into();
@@ -4145,6 +4217,27 @@ unsafe extern "system" fn display_monitor_proc(
     const PBT_APMRESUMESUSPEND: u32 = 0x0007;
     const WM_DWMCOLORIZATIONCOLORCHANGED: u32 = 0x0320;
     const WM_SETTINGCHANGE: u32 = 0x001A;
+
+    if msg != 0 && msg == TASKBAR_CREATED_MESSAGE.load(Ordering::Relaxed) {
+        // Explorer has rebuilt its AppBar list. A primary-monitor DPI change
+        // can send the same broadcast, so re-register in either case.
+        MAIN_APPBAR_REGISTERED.store(false, Ordering::Relaxed);
+        DOCK_APPBAR_REGISTERED.store(false, Ordering::Relaxed);
+        if let Some(app_handle) = DISPLAY_MONITOR_HANDLE.get() {
+            let ah = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                for delay in [300, 1200] {
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    if SHUTTING_DOWN.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    refresh_taskbar_owner();
+                    reposition_all_windows(&ah);
+                }
+            });
+        }
+        return LRESULT(0);
+    }
 
     match msg {
         WM_DISPLAYCHANGE => {
@@ -4281,7 +4374,7 @@ fn recover_from_webview_failure(handle: &AppHandle) {
 mod tests {
     use super::{
         is_helper_name, is_launchable_entry, notch_mode_reserves_work_area, pack_cursor,
-        unpack_cursor, win_number_index,
+        trim_thumbnail_cache, unpack_cursor, win_number_index,
     };
 
     #[test]
@@ -4290,6 +4383,17 @@ mod tests {
             let point = windows::Win32::Foundation::POINT { x, y };
             assert_eq!(unpack_cursor(pack_cursor(point)), point);
         }
+    }
+
+    #[test]
+    fn thumbnail_cache_evicts_oldest_live_windows() {
+        let mut cache = (0..20)
+            .map(|key| (key, (String::new(), key as i64)))
+            .collect();
+        trim_thumbnail_cache(&mut cache, 19, |_| true);
+        assert_eq!(cache.len(), 15);
+        assert!(cache.contains_key(&19));
+        assert!((0..5).all(|key| !cache.contains_key(&key)));
     }
 
     #[test]

@@ -678,7 +678,7 @@ unsafe fn visible_windows() -> Vec<HWND> {
 /// clicked), above the pointer and kept on that monitor. The menu is found by
 /// its process's executable: many icons are identified by GUID and carry no
 /// window to take the process from.
-unsafe fn move_new_menu_to(app_path: &str, before: &[HWND], anchor: POINT) {
+unsafe fn move_new_menu_to(app_path: &str, before: &[HWND], anchor: POINT) -> Option<HWND> {
     use windows::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
@@ -687,6 +687,12 @@ unsafe fn move_new_menu_to(app_path: &str, before: &[HWND], anchor: POINT) {
         std::thread::sleep(std::time::Duration::from_millis(25));
         let Some(menu) = visible_windows().into_iter().find(|hwnd| {
             if before.contains(hwnd) {
+                return false;
+            }
+            let mut class_name = [0u8; 256];
+            let len =
+                windows::Win32::UI::WindowsAndMessaging::GetClassNameA(*hwnd, &mut class_name);
+            if &class_name[..len as usize] != b"#32768" {
                 return false;
             }
             let mut pid = 0u32;
@@ -698,7 +704,7 @@ unsafe fn move_new_menu_to(app_path: &str, before: &[HWND], anchor: POINT) {
         };
         let mut rect = RECT::default();
         if GetWindowRect(menu, &mut rect).is_err() {
-            return;
+            return Some(menu);
         }
         let (width, height) = (rect.right - rect.left, rect.bottom - rect.top);
         let mut info = MONITORINFO {
@@ -707,7 +713,7 @@ unsafe fn move_new_menu_to(app_path: &str, before: &[HWND], anchor: POINT) {
         };
         let monitor = MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST);
         if !GetMonitorInfoW(monitor, &mut info).as_bool() {
-            return;
+            return Some(menu);
         }
         let area = info.rcMonitor;
         let x = anchor
@@ -723,7 +729,20 @@ unsafe fn move_new_menu_to(app_path: &str, before: &[HWND], anchor: POINT) {
             0,
             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
         );
-        return;
+        return Some(menu);
+    }
+    None
+}
+
+/// Keep the dock's native-menu hold until the external popup closes. UIA's
+/// ShowContextMenu returns when the popup opens, not when the user dismisses it.
+unsafe fn wait_for_menu_close(menu: HWND) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < deadline
+        && IsWindow(Some(menu)).as_bool()
+        && IsWindowVisible(menu).as_bool()
+    {
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
 
@@ -760,7 +779,11 @@ pub fn interact(key: &str, context_menu: bool) -> Result<(), String> {
             element
                 .ShowContextMenu()
                 .map_err(|_| "Windows could not open this app's native tray menu.".to_string())?;
-            move_new_menu_to(&icon.path, &before, cursor);
+            let menu = move_new_menu_to(&icon.path, &before, cursor);
+            drop(exposure);
+            if let Some(menu) = menu {
+                wait_for_menu_close(menu);
+            }
             Ok(())
         } else {
             let element: IUIAutomationElement = element.cast().map_err(|e| e.to_string())?;

@@ -45,7 +45,9 @@ export function useSettingsSync(
 			(event) => {
 				const { key, value } = event.payload;
 
-				if (value !== null) {
+				if (key === "bloom-weather-lat" || key === "bloom-weather-lon") {
+					localStorage.removeItem(key);
+				} else if (value !== null) {
 					localStorage.setItem(key, String(value));
 				} else {
 					localStorage.removeItem(key);

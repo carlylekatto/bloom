@@ -88,3 +88,6 @@ pub static PROCESS_NAME_CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLo
 pub static THUMBNAIL_CACHE: OnceLock<Mutex<HashMap<isize, (String, i64)>>> = OnceLock::new();
 pub static FOCUS_TIMESTAMPS: OnceLock<Mutex<HashMap<isize, i64>>> = OnceLock::new();
 pub static SETTINGS_CACHE: OnceLock<Mutex<HashMap<String, serde_json::Value>>> = OnceLock::new();
+/// Serialize read/modify/write settings commands from all four webviews.
+pub static SETTINGS_FILE_LOCK: Mutex<()> = Mutex::new(());
+pub static PINNED_FILE_LOCK: Mutex<()> = Mutex::new(());

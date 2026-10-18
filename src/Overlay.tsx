@@ -10,6 +10,7 @@ import { reloadIfMirrorWasStale } from "./hooks/settingsMirror";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { MixerIcon, SpeakerIcon } from "./icons";
 import { AudioMixer } from "./components/AudioMixer";
+import { useMouseSliderDrag } from "./hooks/useMouseSliderDrag";
 import "./Overlay.css";
 import { EdgeSurface } from "./components/EdgeSurface";
 import { initTheme } from "./theme";
@@ -90,21 +91,15 @@ function VolumeNotch({
 		onVolumeChange(newVolume);
 	};
 
+	const startDrag = useMouseSliderDrag((clientY) => {
+		if (!barRef.current) return;
+		const rect = barRef.current.getBoundingClientRect();
+		const relativeY = rect.bottom - clientY;
+		const newVolume = Math.max(0, Math.min(1, relativeY / rect.height));
+		onVolumeChange(newVolume);
+	});
 	const handleMouseDown = (e: React.MouseEvent) => {
-		handleBarInteraction(e);
-		const handleMouseMove = (moveE: MouseEvent) => {
-			if (!barRef.current) return;
-			const rect = barRef.current.getBoundingClientRect();
-			const relativeY = rect.bottom - moveE.clientY;
-			const newVolume = Math.max(0, Math.min(1, relativeY / rect.height));
-			onVolumeChange(newVolume);
-		};
-		const handleMouseUp = () => {
-			document.removeEventListener("mousemove", handleMouseMove);
-			document.removeEventListener("mouseup", handleMouseUp);
-		};
-		document.addEventListener("mousemove", handleMouseMove);
-		document.addEventListener("mouseup", handleMouseUp);
+		startDrag(e.clientY);
 	};
 
 	return (
@@ -247,21 +242,15 @@ function BrightnessNotch({
 		onBrightnessChange(newBrightness);
 	};
 
+	const startDrag = useMouseSliderDrag((clientY) => {
+		if (!barRef.current) return;
+		const rect = barRef.current.getBoundingClientRect();
+		const relativeY = rect.bottom - clientY;
+		const newBrightness = Math.max(0, Math.min(100, (relativeY / rect.height) * 100));
+		onBrightnessChange(newBrightness);
+	});
 	const handleMouseDown = (e: React.MouseEvent) => {
-		handleBarInteraction(e);
-		const handleMouseMove = (moveE: MouseEvent) => {
-			if (!barRef.current) return;
-			const rect = barRef.current.getBoundingClientRect();
-			const relativeY = rect.bottom - moveE.clientY;
-			const newBrightness = Math.max(0, Math.min(100, (relativeY / rect.height) * 100));
-			onBrightnessChange(newBrightness);
-		};
-		const handleMouseUp = () => {
-			document.removeEventListener("mousemove", handleMouseMove);
-			document.removeEventListener("mouseup", handleMouseUp);
-		};
-		document.addEventListener("mousemove", handleMouseMove);
-		document.addEventListener("mouseup", handleMouseUp);
+		startDrag(e.clientY);
 	};
 
 	return (
