@@ -15,7 +15,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetWindowLongW, GetWindowThreadProcessId, IsWindowVisible, SetWindowsHookExW,
-    GWL_EXSTYLE, MSLLHOOKSTRUCT, WH_MOUSE_LL, WM_MOUSEMOVE, WS_EX_TOOLWINDOW,
+    GWL_EXSTYLE, MSLLHOOKSTRUCT, WH_MOUSE_LL, WM_MOUSEMOVE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
 };
 use wmi::{COMLibrary, WMIConnection};
 
@@ -3874,6 +3874,13 @@ unsafe fn dialog_has_tab_control(hwnd: HWND) -> bool {
     found
 }
 
+/// True if another window that is on screen owns `hwnd`.
+unsafe fn has_visible_owner(hwnd: HWND) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindow, GW_OWNER};
+    GetWindow(hwnd, GW_OWNER)
+        .is_ok_and(|owner| !owner.is_invalid() && IsWindowVisible(owner).as_bool())
+}
+
 pub unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let apps = &mut *(lparam.0 as *mut Vec<AppInfo>);
 
@@ -3909,6 +3916,14 @@ pub unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> B
             // We include windows without captions if they don't have the ToolWindow style,
             // as many games and modern apps (like Spotify/Valorant) lack WS_CAPTION.
             if (ex_style & WS_EX_TOOLWINDOW.0) != 0 {
+                return true.into();
+            }
+
+            // Dialogs such as Find or Save As belong to the window that owns
+            // them, as on the taskbar, so they don't show as windows of their
+            // own. Some frameworks give the real main window a hidden owner;
+            // those, and windows that ask for a taskbar button, still show.
+            if (ex_style & WS_EX_APPWINDOW.0) == 0 && has_visible_owner(hwnd) {
                 return true.into();
             }
 

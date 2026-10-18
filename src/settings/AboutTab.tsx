@@ -83,12 +83,14 @@ export function AboutTab({
 	const getExportLabel = () => {
 		if (exportStatus === "exporting") return "Exporting...";
 		if (exportStatus === "success") return "Exported!";
+		if (exportStatus === "error") return "Export failed. Try again.";
 		return "Export Settings";
 	};
 
 	const getImportLabel = () => {
 		if (importStatus === "importing") return "Importing...";
 		if (importStatus === "success") return "Imported!";
+		if (importStatus === "error") return "Import failed. Check the file and try again.";
 		return "Import Settings";
 	};
 

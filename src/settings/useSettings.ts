@@ -869,18 +869,13 @@ export function useSettings() {
 	};
 
 	// ── Export / Import ──
+	// The backend opens the native dialog and owns the file path, so these
+	// cannot be used to read or write arbitrary files from a webview.
 	const handleExportSettings = async () => {
 		setExportStatus("exporting");
 		try {
-			const { save: saveDialog } = await import("@tauri-apps/plugin-dialog");
-			const settingsJson = await invoke<string>("export_settings");
-			const filePath = await saveDialog({
-				title: "Export Bloom Settings",
-				defaultPath: "bloom-settings.json",
-				filters: [{ name: "JSON", extensions: ["json"] }]
-			});
+			const filePath = await invoke<string | null>("export_settings_to_file");
 			if (filePath) {
-				await invoke("write_settings_to_path", { path: filePath, content: settingsJson });
 				setExportStatus("success");
 				setTimeout(() => setExportStatus("idle"), 2000);
 			} else {
@@ -896,17 +891,8 @@ export function useSettings() {
 	const handleImportSettings = async () => {
 		setImportStatus("importing");
 		try {
-			const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
-			const filePath = await openDialog({
-				title: "Import Bloom Settings",
-				filters: [{ name: "JSON", extensions: ["json"] }],
-				multiple: false
-			});
+			const filePath = await invoke<string | null>("import_settings_from_file");
 			if (filePath) {
-				const content = await invoke<string>("read_settings_from_path", {
-					path: filePath as string
-				});
-				await invoke("import_settings", { settings: content });
 				await loadAllSettings();
 				setImportStatus("success");
 				setTimeout(() => setImportStatus("idle"), 2000);

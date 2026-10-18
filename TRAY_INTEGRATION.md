@@ -10,8 +10,8 @@ App Separator controls the thin theme-aware divider; it is on by default and
 appears only when an unpinned app is present.
 
 - Click a background app to invoke its notification icon's default action.
-- Right-click a background app to request its native tray context menu.
-- Shift-right-click opens Bloom's menu for pinning and icon customization.
+- Right-click a background app for Bloom's menu. Its "App tray menu" entry
+  opens the app's native tray context menu.
 - An app with several tray icons has a separate menu entry for each icon.
 - Start's context menu includes Task Manager, Disk Management, Device Manager,
   Computer Management and Windows settings shortcuts. The dock background menu
@@ -73,7 +73,8 @@ Manual acceptance checks (required before merging):
    already active in the tray show a grey dot.
 2. Start an unpinned Discord with one window: one normal dot, no duplicate entry.
 3. Close Discord to the tray: one grey dot, no window thumbnail.
-4. Right-click its dock icon: Discord's own menu appears and its actions work.
+4. Right-click its dock icon: Bloom's menu appears. Its "App tray menu" entry
+   opens Discord's own menu, and its actions work.
 5. Click the background icon: Discord responds through its tray default action.
 6. Quit Discord through its native menu: unpinned icon disappears; pinned dot clears
    within the 10-second safety poll.

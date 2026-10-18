@@ -775,11 +775,6 @@ const Dock = memo(function Dock() {
 	const handleContextMenu = (e: React.MouseEvent, app: AppInfo | null) => {
 		e.stopPropagation();
 		e.preventDefault();
-		// Shift-right-click keeps Bloom pin/customization controls available.
-		if (app?.is_background && app.tray_ids?.length === 1 && !e.shiftKey) {
-			void openTrayMenu(app.tray_ids[0]);
-			return;
-		}
 		setContextMenu({ x: e.clientX, y: e.clientY, app });
 	};
 

@@ -1,29 +1,30 @@
 # Tray apps in the dock — open design question
 
-Status: **open**. Shipped a mitigation (a setting); the underlying design is
-still wrong. Written down so the next person does not rediscover it from a
-misclick.
+Status: **open, and narrower than it was**. The right-click problem described
+below was fixed upstream (#234). What remains is the layout argument: the dock
+row is visually ambiguous between windows and tray icons. Written down so the
+next person does not rediscover it from a misclick.
 
 ## The symptom
 
 An app that closes its window to the system tray — Cisco App, Unikey,
 OpenKey, and others — keeps a lit icon in Bloom's dock. The user expects it to
-leave, the way the Windows taskbar hides it behind the tray overflow. Right
-clicking the icon opens Windows' own tray menu for that app instead of
-Bloom's context menu.
+leave, the way the Windows taskbar hides it behind the tray overflow. The icon
+looks exactly like a running app's icon, so it invites the click that assumes it
+is one.
 
 ## It is upstream behaviour, not a fork bug
 
 Introduced by `5792ce3`, PR #168, "keep background tray apps in the dock and
-add notch panel arrows", by Dhanush Santosh, 2026-10-09. The same commit wrote
-both halves of the behaviour: keeping the icon, and hijacking right click.
+add notch panel arrows", by Dhanush Santosh, 2026-10-09. That commit wrote both
+halves of the original behaviour: keeping the icon, and hijacking right click.
 
 ## The window enumeration is not at fault
 
 Checked first, because "the dock forgot to filter hidden windows" is the
 obvious suspect and it is wrong here.
 
-`src-tauri/src/services.rs:3504` filters on `IsWindowVisible`, and also checks
+`src-tauri/src/services.rs` filters on `IsWindowVisible`, and also checks
 `DWMWA_CLOAKED` for shell-cloaked and suspended windows. Both are correct.
 
 Enumerating every top-level window of a closed-to-tray OpenKey64 on the
@@ -32,7 +33,7 @@ reporting machine:
 ```
 hwnd=0x350066   vis=False   rect=(77,77)-(1229,777)  1152x700
 hwnd=0x87002BE  vis=False   rect=0x0
-hwnd=0x3C0CF6   vis=False   rect=0x0
+hwnd=0x3C6CF6   vis=False   rect=0x0
 ```
 
 All three are `IsWindowVisible = FALSE`. The app hid its window properly with
@@ -58,13 +59,9 @@ So the sequence is: OpenKey opens a window, it is observed; you close the
 window; the window list is now empty for it, but the tray entry still is, and
 the merge puts it back. The dock is showing the tray, not a stale window.
 
-## Why it is a footgun, not a preference
+## Left click still forwards to the app
 
-A background dock item is visually identical to a running app icon. The user
-cannot tell that it is a tray icon, so muscle memory applies and the usual
-assumption — "that app is open" — sends them to click it.
-
-**Left click** (`Dock.tsx:649`):
+`Dock.tsx:704`:
 
 ```tsx
 } else if (app.is_background && app.tray_ids?.length === 1) {
@@ -73,10 +70,13 @@ assumption — "that app is open" — sends them to click it.
 ```
 
 This forwards whatever the tray icon does on a left click. For most apps that
-is "restore the window", which is harmless. For an app whose tray click does
-something else, the user has no idea they just triggered it.
+is "restore the window", which is harmless and arguably what the user wanted.
+For an app whose tray click does something else, the user has no idea they just
+triggered it. Unchanged by #234.
 
-**Right click** (`Dock.tsx:713`):
+## The right-click hijack — resolved upstream
+
+Right click used to bypass Bloom's menu entirely for a single-icon tray app:
 
 ```tsx
 if (app?.is_background && app.tray_ids?.length === 1 && !e.shiftKey) {
@@ -85,13 +85,17 @@ if (app?.is_background && app.tray_ids?.length === 1 && !e.shiftKey) {
 }
 ```
 
-Windows' tray menu opens directly, in the position the user expects Bloom's
+Windows' tray menu opened directly, in the position the user expected Bloom's
 menu to be. Those menus routinely carry destructive items — OpenKey's has
-"Thoát" (Exit) — and the user reaches for a familiar slot without reading.
+"Thoát" (Exit) — and the user reaches for a familiar slot without reading. The
+`!e.shiftKey` was a tell: the author shipped a hidden escape hatch for a
+behaviour they understood to be hostile.
 
-Note the `!e.shiftKey`: the author knew the hijack was hostile and shipped a
-hidden escape hatch for it. That is a tell. A behaviour that needs
-Shift to escape was understood to be wrong at the time it was written.
+`2f46bc3`, PR #234, removed the branch. Right click now always opens Bloom's
+menu, and the app's native tray menu is one click away under **App tray menu**
+(`Dock.tsx:1865`) — the entry that already existed for apps with several tray
+icons. Nothing was lost in the move; the destructive menu is simply no longer
+where the user was not looking for it.
 
 ## What is actually wrong
 
@@ -121,12 +125,15 @@ than waiting for a window to open.
 Upstream's behaviour is on, so defaulting off is a visible divergence and any
 existing user loses their tray apps from the dock on upgrade.
 
-The footgun still wins. With it on, a tray app in the dock answers a right
-click with Windows' tray menu, whose entries include Quit, so a stray click
-quits the app. That cost lands on everyone who does not find the setting, and
-nobody goes looking for a toggle they do not know exists. Defaulting off means
-the dock does what the taskbar it replaced does, and turning it on is one click
-in Settings for anyone who wants upstream's layout.
+Originally the deciding argument was the footgun above: a stray right click
+answered with a tray menu whose entries include Quit. That argument is gone,
+and this default is now a layout preference rather than a safety one — the dock
+row stays unambiguous, and it does what the taskbar it replaced does.
+
+That is a weaker reason than the one the setting shipped with, and it is
+recorded here as such. If upstream ever adds its own tray area, the case for
+removing the setting is the layout one, and this default should probably follow
+whatever they choose.
 
 The cost is bounded: `selectDockTrayApps` keeps running either way, so
 switching it back on shows what is already running.
@@ -134,17 +141,19 @@ switching it back on shows what is already running.
 ## Divergence from upstream
 
 This setting is a fork-only divergence. If upstream revisits #168, this is the
-place to argue with them — and the case is the footgun above, not the layout
-preference.
+place to argue with them. Note that #234 already took the strongest half of
+the argument — the destructive right click — off the table upstream, so the
+remaining case is the layout one.
 
 ## Code map
 
 | What | Where |
 |---|---|
-| Window enumeration and its filters | `src-tauri/src/services.rs:3501` (`enum_windows_proc`) |
-| Tray enumeration | `src-tauri/src/tray.rs`, `get_tray_apps` in `commands.rs:4155` |
+| Window enumeration and its filters | `src-tauri/src/services.rs` (`enum_windows_proc`) |
+| Tray enumeration | `src-tauri/src/tray.rs`, `get_tray_apps` in `commands.rs` |
 | Tray eligibility | `src/dockApps.ts:32` (`selectDockTrayApps`) |
 | The merge that adds the icon | `src/dockApps.ts:54` (`mergeTrayApps`) |
-| Left click forwarding | `src/Dock.tsx:649` |
-| Right click hijack | `src/Dock.tsx:713` |
+| Left click forwarding | `src/Dock.tsx:704` |
+| Right click, always Bloom's menu | `src/Dock.tsx:775` (`handleContextMenu`) |
+| "App tray menu" entry | `src/Dock.tsx:1865` |
 | The setting | `Dock.tsx`, `settings/useSettings.ts`, `settings/DockTab.tsx`, `SETTINGS.md` |
