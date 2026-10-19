@@ -492,8 +492,14 @@ fn empty_recycle_bin() -> Result<(), String> {
     if let Ok(mut guard) = recycle_bin_cache().lock() {
         guard.checked_ms = 0;
     }
-    unsafe { SHEmptyRecycleBinW(None, None, SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND) }
-        .map_err(|_| "Could not empty the Recycle Bin".to_string())
+    unsafe {
+        SHEmptyRecycleBinW(
+            None,
+            None,
+            SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND,
+        )
+    }
+    .map_err(|_| "Could not empty the Recycle Bin".to_string())
 }
 
 #[tauri::command]

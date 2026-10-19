@@ -1224,10 +1224,8 @@ pub fn dock_log(line: &str) {
             if meta.len() > 2_000_000 {
                 drop(f);
                 if let Ok(content) = std::fs::read_to_string(&path) {
-                    let trimmed: String = content
-                        .chars()
-                        .skip(content.chars().count() / 2)
-                        .collect();
+                    let trimmed: String =
+                        content.chars().skip(content.chars().count() / 2).collect();
                     let _ = std::fs::write(&path, trimmed);
                 }
             }
@@ -1387,8 +1385,7 @@ pub fn capture_hwnd_to_base64(hwnd: HWND, max_width: u32, max_height: u32) -> Op
         if success != 0 {
             crate::utils::dock_log(&format!(
                 "capture start hwnd=0x{:x} printwindow={}",
-                hwnd.0 as isize,
-                success
+                hwnd.0 as isize, success
             ));
         }
 

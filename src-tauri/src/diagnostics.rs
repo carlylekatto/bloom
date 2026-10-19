@@ -32,12 +32,12 @@ use windows::Win32::{
     UI::WindowsAndMessaging::{EnumWindows, GetClassNameA},
 };
 
+use crate::state::*;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::state::*;
 
 // â”€â”€â”€ Runtime log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -125,7 +125,6 @@ fn append_line(path: &Path, line: &str) -> io::Result<()> {
 }
 
 // â”€â”€â”€ Read-only snapshot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 
 #[derive(Serialize)]
 pub struct MonitorInfo {

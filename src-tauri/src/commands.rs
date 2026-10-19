@@ -3536,11 +3536,9 @@ pub async fn get_brightness_state(refresh: bool) -> Result<crate::ddc_ci::Bright
 /// write blocks for ~50 ms per monitor.
 #[tauri::command]
 pub async fn set_monitor_brightness(index: usize, brightness: u32) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::ddc_ci::set_one(index, brightness.min(100))
-    })
-    .await
-    .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || crate::ddc_ci::set_one(index, brightness.min(100)))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

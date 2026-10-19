@@ -3,9 +3,9 @@
 mod battery;
 mod bluetooth;
 mod commands;
+mod ddc_ci;
 mod diagnostics;
 mod dock_extras;
-mod ddc_ci;
 mod services;
 mod shelf;
 mod shelf_preview;
@@ -221,11 +221,11 @@ fn main() {
             updater::check_for_updates,
             updater::install_update,
             updater::get_update_state,
-diagnostics::get_diagnostics,
+            diagnostics::get_diagnostics,
             dock_extras::get_dock_extras,
             dock_extras::open_dock_extra,
             dock_extras::eject_dock_extra,
-dock_extras::dock_extra_action,
+            dock_extras::dock_extra_action,
             dock_extras::get_dock_drives,
             wifi::wifi_list_networks,
             wifi::wifi_scan,

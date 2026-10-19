@@ -2526,6 +2526,70 @@ fn top_edge_armed_for(
     false
 }
 
+/// Whether `cursor` is inside an open menu drawn at `rect` (logical pixels, webview
+/// coordinates) inside the dock window positioned at `win_pos`.
+///
+/// Split out from `cursor_over_open_menu` so the scale and padding arithmetic can
+/// be tested without an AppHandle, a live window, or a monitor.
+fn cursor_in_menu_rect(
+    cursor: windows::Win32::Foundation::POINT,
+    win_pos: (i32, i32),
+    rect: (i32, i32, i32, i32),
+    scale: f64,
+    pad_logical: f64,
+) -> bool {
+    let pad = (pad_logical * scale) as i32;
+    let rx = win_pos.0 + (rect.0 as f64 * scale) as i32 - pad;
+    let ry = win_pos.1 + (rect.1 as f64 * scale) as i32 - pad;
+    let rw = (rect.2 as f64 * scale) as i32 + (pad * 2);
+    let rh = (rect.3 as f64 * scale) as i32 + (pad * 2);
+    cursor.x >= rx && cursor.x <= (rx + rw) && cursor.y >= ry && cursor.y <= (ry + rh)
+}
+
+/// True when the cursor sits inside the open dock menu or Add App popup.
+///
+/// An open menu sets MENU_IS_OPEN. Reading that flag on its own used to make
+/// every Bloom window catch clicks across its entire rectangle, including the
+/// parts where nothing is drawn, so a click anywhere on the screen was swallowed
+/// while a menu was open (upstream #285). Only the dock window ever has one of
+/// these menus, and only over the rectangle the frontend reported, so the flag
+/// has to be scoped to that rectangle. Everything else goes back to the window
+/// underneath, which is what the user was aiming at.
+///
+/// The dock already scoped this the same way in update_dock_interaction; the
+/// notch and sync_dock_click_through were the two paths that did not. The notch
+/// has no menu of its own — its only context menus are Windows' own, opened by
+/// the WiFi and Bluetooth handlers, which never set the flag — so scoping the
+/// notch is what actually fixes the swallowed click.
+///
+/// Returns false when the flag is unset, the rectangle is missing, or either lock
+/// is held. A missing rectangle means the frontend has not reported one yet, and
+/// the safe answer is to let the click through rather than guess.
+fn cursor_over_open_menu(app: &AppHandle, cursor: windows::Win32::Foundation::POINT) -> bool {
+    if !MENU_IS_OPEN.load(Ordering::Relaxed) {
+        return false;
+    }
+    let Ok(rect) = MENU_RECT.try_lock() else {
+        return false;
+    };
+    let Some(r) = *rect else {
+        return false;
+    };
+    let Some(dock_win) = app.get_webview_window("dock") else {
+        return false;
+    };
+    let Some((win_pos, _)) = DOCK_WINDOW_RECT.lock().ok().and_then(|g| *g) else {
+        return false;
+    };
+    cursor_in_menu_rect(
+        cursor,
+        (win_pos.x, win_pos.y),
+        (r.x, r.y, r.width, r.height),
+        dock_win.scale_factor().unwrap_or(1.0),
+        5.0,
+    )
+}
+
 /// Hover + click-through state for the notch window. Shared by the mouse hook
 /// (on movement) and the top-edge watchdog (to finish a stationary dwell).
 fn update_main_interaction(
@@ -2661,7 +2725,7 @@ fn update_main_interaction(
         MH_LAST_TOP_EDGE_HOVER.store(new_val, Ordering::Relaxed);
     }
 
-    let final_ignore = !is_click_interactive && !MENU_IS_OPEN.load(Ordering::Relaxed);
+    let final_ignore = !is_click_interactive && !cursor_over_open_menu(app_handle, cursor);
     let prev_ignore = MH_LAST_MAIN_IGNORE.load(Ordering::Relaxed);
     let new_ignore = if final_ignore { 1 } else { 0 };
     if prev_ignore != new_ignore {
@@ -2729,7 +2793,7 @@ pub fn sync_dock_click_through(app: &AppHandle) {
         return;
     }
     let (over, _) = dock_region_hit(&dock_win, pt);
-    let should_ignore = !over && !MENU_IS_OPEN.load(Ordering::Relaxed);
+    let should_ignore = !over && !cursor_over_open_menu(app, pt);
     let prev = MH_LAST_DOCK_IGNORE.load(Ordering::Relaxed);
     let new_ignore = if should_ignore { 1 } else { 0 };
     if prev == new_ignore {
@@ -2894,23 +2958,8 @@ fn update_dock_interaction(
                 }
             }
 
-            if !is_click_interactive && MENU_IS_OPEN.load(Ordering::Relaxed) {
-                if let Ok(rect) = MENU_RECT.try_lock() {
-                    if let Some(r) = *rect {
-                        let scale = dock_win.scale_factor().unwrap_or(1.0);
-                        let rx = win_pos.x + (r.x as f64 * scale) as i32 - (5.0 * scale) as i32;
-                        let ry = win_pos.y + (r.y as f64 * scale) as i32 - (5.0 * scale) as i32;
-                        let rw = (r.width as f64 * scale) as i32 + (10.0 * scale) as i32;
-                        let rh = (r.height as f64 * scale) as i32 + (10.0 * scale) as i32;
-                        if cursor.x >= rx
-                            && cursor.x <= (rx + rw)
-                            && cursor.y >= ry
-                            && cursor.y <= (ry + rh)
-                        {
-                            is_click_interactive = true;
-                        }
-                    }
-                }
+            if !is_click_interactive && cursor_over_open_menu(app_handle, cursor) {
+                is_click_interactive = true;
             }
         }
     }
@@ -2951,7 +3000,7 @@ fn update_dock_interaction(
         MH_LAST_EDGE_HOVER.store(new_val, Ordering::Relaxed);
     }
 
-    let should_ignore = !is_click_interactive && !MENU_IS_OPEN.load(Ordering::Relaxed);
+    let should_ignore = !is_click_interactive && !cursor_over_open_menu(app_handle, cursor);
     let prev_ignore = MH_LAST_DOCK_IGNORE.load(Ordering::Relaxed);
     let new_ignore = if should_ignore { 1 } else { 0 };
     if prev_ignore != new_ignore {
@@ -4428,9 +4477,61 @@ fn recover_from_webview_failure(handle: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_helper_name, is_launchable_entry, notch_mode_reserves_work_area, pack_cursor,
-        trim_thumbnail_cache, unpack_cursor, win_number_index,
+        cursor_in_menu_rect, is_helper_name, is_launchable_entry, notch_mode_reserves_work_area,
+        pack_cursor, trim_thumbnail_cache, unpack_cursor, win_number_index,
     };
+
+    /// The dock reports its menu in logical webview pixels, so the same click
+    /// lands on a different physical point on every display scale. The padding
+    /// has to scale with it, or the menu stops being clickable at the edge on a
+    /// scaled display and swallows clicks just outside it at 100%.
+    #[test]
+    fn menu_rect_hit_scales_with_the_display() {
+        let at = |x, y| windows::Win32::Foundation::POINT { x, y };
+        let win_pos = (0, 900);
+        let rect = (100, 20, 200, 300);
+
+        // 100%: the rect is used as reported.
+        assert!(cursor_in_menu_rect(at(150, 950), win_pos, rect, 1.0, 5.0));
+        assert!(!cursor_in_menu_rect(at(10, 950), win_pos, rect, 1.0, 5.0));
+
+        // 200%: the same logical point twice as far from the window origin, and
+        // the padding doubled along with it.
+        assert!(cursor_in_menu_rect(at(300, 1000), win_pos, rect, 2.0, 5.0));
+        assert!(!cursor_in_menu_rect(at(60, 1000), win_pos, rect, 2.0, 5.0));
+
+        // Just outside the rect, but inside the padding: still a hit, which is
+        // what stops a click on the menu border from going to the app below.
+        assert!(cursor_in_menu_rect(at(97, 950), win_pos, rect, 1.0, 5.0));
+    }
+
+    /// A dock on a monitor above or left of the primary one reports negative
+    /// window coordinates. Comparing against the origin instead of the window
+    /// position put the whole menu somewhere else on the virtual desktop, which
+    /// is the other way this scoping could silently fail.
+    #[test]
+    fn menu_rect_hit_follows_a_dock_on_a_secondary_monitor() {
+        let at = |x, y| windows::Win32::Foundation::POINT { x, y };
+        let rect = (100, 20, 200, 300);
+
+        // The centre of the reported rect, at (-1920, 0) + (200, 170).
+        assert!(cursor_in_menu_rect(
+            at(-1720, 170),
+            (-1920, 0),
+            rect,
+            1.0,
+            5.0
+        ));
+        // The same point as if the dock were on the primary monitor.
+        assert!(!cursor_in_menu_rect(at(-1720, 170), (0, 0), rect, 1.0, 5.0));
+        assert!(!cursor_in_menu_rect(
+            at(100, 100),
+            (-1920, 0),
+            rect,
+            1.0,
+            5.0
+        ));
+    }
 
     #[test]
     fn cursor_snapshot_preserves_negative_virtual_desktop_coordinates() {

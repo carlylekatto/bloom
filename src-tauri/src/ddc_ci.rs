@@ -108,7 +108,11 @@ static FAKE_DISPLAYS: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
 /// centre grows 26px per row.
 #[cfg(debug_assertions)]
 fn fake_count() -> Option<usize> {
-    let count = std::env::var("BLOOM_FAKE_DDC").ok()?.trim().parse::<usize>().ok()?;
+    let count = std::env::var("BLOOM_FAKE_DDC")
+        .ok()?
+        .trim()
+        .parse::<usize>()
+        .ok()?;
     (1..=8).contains(&count).then_some(count)
 }
 
@@ -168,7 +172,6 @@ fn fake_set(index: usize, percent: u32) -> Option<bool> {
     Some(true)
 }
 
-
 /// Rebuilds the `HANDLE` the Win32 calls take.
 fn as_handle(raw: usize) -> HANDLE {
     HANDLE(raw as *mut std::ffi::c_void)
@@ -199,7 +202,11 @@ fn label(monitor: &Monitor) -> String {
         return description.to_string();
     }
     let device = String::from_utf16_lossy(&monitor.device[..device_len(&monitor.device)]);
-    match device.rsplit(['\\', ':']).next().filter(|part| !part.is_empty()) {
+    match device
+        .rsplit(['\\', ':'])
+        .next()
+        .filter(|part| !part.is_empty())
+    {
         // "\\.\DISPLAY2" -> "Display 2"
         Some(display) => {
             // `get` instead of slicing: a non-ASCII device name must not panic.
@@ -248,7 +255,9 @@ fn try_ddc_ci<F: FnMut() -> bool>(mut operation: F) -> bool {
 /// `GetMonitorBrightness` as `(min, current, max)`.
 fn high_level_get(handle: HANDLE) -> Option<(u32, u32, u32)> {
     let (mut min, mut current, mut max) = (0u32, 0u32, 0u32);
-    let ok = try_ddc_ci(|| unsafe { GetMonitorBrightness(handle, &mut min, &mut current, &mut max) != 0 });
+    let ok = try_ddc_ci(|| unsafe {
+        GetMonitorBrightness(handle, &mut min, &mut current, &mut max) != 0
+    });
     ok.then_some((min, current, max))
 }
 
@@ -284,7 +293,11 @@ fn vcp_get_once(handle: HANDLE, code: u8) -> Option<(u32, u32)> {
 fn probe_once() -> (Vec<Monitor>, usize) {
     // Third slot holds handles we will not use, so they can be closed instead
     // of leaked.
-    let found = std::sync::Mutex::new((Vec::<Monitor>::new(), 0usize, Vec::<PHYSICAL_MONITOR>::new()));
+    let found = std::sync::Mutex::new((
+        Vec::<Monitor>::new(),
+        0usize,
+        Vec::<PHYSICAL_MONITOR>::new(),
+    ));
 
     unsafe extern "system" fn collect(
         hmonitor: HMONITOR,
@@ -293,7 +306,8 @@ fn probe_once() -> (Vec<Monitor>, usize) {
         lparam: LPARAM,
     ) -> windows::core::BOOL {
         use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITORINFOEXW};
-        let found = &*(lparam.0 as *const std::sync::Mutex<(Vec<Monitor>, usize, Vec<PHYSICAL_MONITOR>)>);
+        let found =
+            &*(lparam.0 as *const std::sync::Mutex<(Vec<Monitor>, usize, Vec<PHYSICAL_MONITOR>)>);
         let mut count = 0u32;
         if GetNumberOfPhysicalMonitorsFromHMONITOR(hmonitor, &mut count).is_ok() && count > 0 {
             let mut monitors = vec![PHYSICAL_MONITOR::default(); count as usize];
@@ -332,7 +346,12 @@ fn probe_once() -> (Vec<Monitor>, usize) {
                     let kept = match (high, vcp) {
                         (Some((min, current, max)), _) if max > min => {
                             let span = max - min;
-                            (Method::HighLevel, min, max, current.saturating_sub(min) * 100 / span)
+                            (
+                                Method::HighLevel,
+                                min,
+                                max,
+                                current.saturating_sub(min) * 100 / span,
+                            )
                         }
                         // A range with no span cannot carry a percentage, so
                         // fall back to the usual 0-100 window.
@@ -365,7 +384,12 @@ fn probe_once() -> (Vec<Monitor>, usize) {
     }
 
     unsafe {
-        let _ = EnumDisplayMonitors(None, None, Some(collect), LPARAM(&found as *const _ as isize));
+        let _ = EnumDisplayMonitors(
+            None,
+            None,
+            Some(collect),
+            LPARAM(&found as *const _ as isize),
+        );
     }
 
     let (monitors, expected, rejected) = found.into_inner().unwrap();
@@ -540,9 +564,7 @@ pub fn state_refreshed() -> BrightnessState {
     // A scan that comes back with fewer displays is almost always one that is
     // asleep rather than a real change; unplugging raises WM_DISPLAYCHANGE,
     // which invalidates the cache outright.
-    let keep_previous = previous
-        .as_ref()
-        .is_some_and(|old| fresh.len() < old.len());
+    let keep_previous = previous.as_ref().is_some_and(|old| fresh.len() < old.len());
 
     let mut cache = MONITORS.lock().unwrap();
     if keep_previous {
@@ -597,7 +619,8 @@ pub fn state() -> BrightnessState {
     // back on the call that claims the slot — reading that as the master
     // would send `u32::MAX` to the slider.
     let seed = monitors[0].brightness;
-    let master = match MASTER.compare_exchange(u32::MAX, seed, Ordering::AcqRel, Ordering::Acquire) {
+    let master = match MASTER.compare_exchange(u32::MAX, seed, Ordering::AcqRel, Ordering::Acquire)
+    {
         Ok(_) => seed,
         Err(current) => current,
     };
