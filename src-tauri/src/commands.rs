@@ -925,6 +925,134 @@ pub async fn get_active_windows() -> Vec<AppInfo> {
     .unwrap_or_default()
 }
 
+/// Where to put a window whose restore rectangle is on no screen, in screen
+/// coordinates: centered in `work`, at its own size if that is at least a
+/// third of the work area each way (shrunk to fit), otherwise at two thirds
+/// of the work area. An off-screen restore rectangle usually carries a broken
+/// size too, such as an app's minimum size.
+fn on_screen_restore_rect(
+    normal: windows::Win32::Foundation::RECT,
+    work: windows::Win32::Foundation::RECT,
+) -> windows::Win32::Foundation::RECT {
+    let work_w = work.right - work.left;
+    let work_h = work.bottom - work.top;
+    let fit = |size: i32, available: i32| {
+        if size >= available / 3 {
+            size.min(available)
+        } else {
+            available * 2 / 3
+        }
+    };
+    let w = fit(normal.right - normal.left, work_w);
+    let h = fit(normal.bottom - normal.top, work_h);
+    let left = work.left + (work_w - w) / 2;
+    let top = work.top + (work_h - h) / 2;
+    windows::Win32::Foundation::RECT {
+        left,
+        top,
+        right: left + w,
+        bottom: top + h,
+    }
+}
+
+/// Before the dock restores a minimized window: if the position Windows will
+/// restore it to lies on no monitor, move that position onto the monitor
+/// under the cursor (the dock's), so the window doesn't come back off-screen.
+/// Apps can leave the off-screen spot Windows parks minimized windows at
+/// (-32000, -32000) as their restore position, and the taskbar would restore
+/// them there too.
+unsafe fn bring_restore_position_on_screen(hwnd: HWND) {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromPoint, MonitorFromRect, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+        MONITOR_DEFAULTTONULL, MONITOR_DEFAULTTOPRIMARY,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetCursorPos, GetWindowLongW, GetWindowPlacement, SetWindowPlacement, GWL_EXSTYLE,
+        WINDOWPLACEMENT, WS_EX_TOOLWINDOW,
+    };
+
+    let mut placement = WINDOWPLACEMENT {
+        length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+        ..Default::default()
+    };
+    if GetWindowPlacement(hwnd, &mut placement).is_err() {
+        return;
+    }
+
+    let monitor_info = |monitor| {
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        GetMonitorInfoW(monitor, &mut info)
+            .as_bool()
+            .then_some(info)
+    };
+    // The restore rectangle is in workspace coordinates, which are offset by
+    // the work area of the monitor it belongs to, unless the window is a tool
+    // window. An off-screen rectangle has no monitor; the nearest one is it.
+    let tool_window = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 != 0;
+    let normal = placement.rcNormalPosition;
+    let Some(source) = monitor_info(MonitorFromRect(&normal, MONITOR_DEFAULTTONEAREST)) else {
+        return;
+    };
+    let source_offset = workspace_offset(&source, tool_window);
+    let on_screen = shift_rect(normal, source_offset);
+    if !MonitorFromRect(&on_screen, MONITOR_DEFAULTTONULL).is_invalid() {
+        return;
+    }
+
+    let mut cursor = POINT::default();
+    let _ = GetCursorPos(&mut cursor);
+    let Some(target) = monitor_info(MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY)) else {
+        return;
+    };
+    placement.rcNormalPosition = restore_rect_on_monitor(on_screen, &target, tool_window);
+    let _ = SetWindowPlacement(hwnd, &placement);
+}
+
+/// How far `monitor`'s work area is inset from its top-left corner: what
+/// separates screen from workspace coordinates on it. Tool windows use
+/// screen coordinates, so none.
+fn workspace_offset(
+    monitor: &windows::Win32::Graphics::Gdi::MONITORINFO,
+    tool_window: bool,
+) -> (i32, i32) {
+    if tool_window {
+        (0, 0)
+    } else {
+        (
+            monitor.rcWork.left - monitor.rcMonitor.left,
+            monitor.rcWork.top - monitor.rcMonitor.top,
+        )
+    }
+}
+
+fn shift_rect(
+    rect: windows::Win32::Foundation::RECT,
+    (dx, dy): (i32, i32),
+) -> windows::Win32::Foundation::RECT {
+    windows::Win32::Foundation::RECT {
+        left: rect.left + dx,
+        top: rect.top + dy,
+        right: rect.right + dx,
+        bottom: rect.bottom + dy,
+    }
+}
+
+/// The restore rectangle, in the target monitor's workspace coordinates, that
+/// centers a window (sized from its screen rectangle `on_screen`) in that
+/// monitor's work area.
+fn restore_rect_on_monitor(
+    on_screen: windows::Win32::Foundation::RECT,
+    target: &windows::Win32::Graphics::Gdi::MONITORINFO,
+    tool_window: bool,
+) -> windows::Win32::Foundation::RECT {
+    let (dx, dy) = workspace_offset(target, tool_window);
+    shift_rect(on_screen_restore_rect(on_screen, target.rcWork), (-dx, -dy))
+}
+
 /// The window outside Bloom that most recently became the foreground window.
 fn last_focused_window() -> Option<HWND> {
     let map = crate::state::FOCUS_TIMESTAMPS.get()?.lock().ok()?;
@@ -976,6 +1104,7 @@ pub async fn focus_window(app: AppHandle, hwnd: isize) -> bool {
             let _ = ShowWindow(hwnd, SW_SHOW);
         }
         if IsIconic(hwnd).as_bool() {
+            bring_restore_position_on_screen(hwnd);
             let _ = ShowWindow(hwnd, SW_RESTORE);
         }
 
@@ -1025,6 +1154,7 @@ pub async fn focus_app_windows(hwnds: Vec<isize>) {
             let _ = ShowWindow(hwnd, SW_SHOW);
         }
         if IsIconic(hwnd).as_bool() {
+            bring_restore_position_on_screen(hwnd);
             let _ = ShowWindow(hwnd, SW_RESTORE);
         }
         let _ = SetForegroundWindow(hwnd);
@@ -4026,6 +4156,98 @@ mod settings_import_tests {
         assert!(read_settings_import(FailedReader)
             .unwrap_err()
             .contains("read failed"));
+    }
+}
+
+#[cfg(test)]
+mod restore_rect_tests {
+    use super::*;
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::MONITORINFO;
+
+    fn rect(left: i32, top: i32, w: i32, h: i32) -> RECT {
+        RECT {
+            left,
+            top,
+            right: left + w,
+            bottom: top + h,
+        }
+    }
+
+    fn monitor(screen: RECT, work: RECT) -> MONITORINFO {
+        MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            rcMonitor: screen,
+            rcWork: work,
+            dwFlags: 0,
+        }
+    }
+
+    #[test]
+    fn converts_with_each_monitors_own_reservation() {
+        // Primary with no reservation; a secondary to its right with a 60px
+        // bar along its top, so its workspace origin is 60px below its screen
+        // origin.
+        let primary = monitor(rect(0, 0, 2880, 1800), rect(0, 0, 2880, 1800));
+        let secondary = monitor(rect(2880, 0, 1920, 1080), rect(2880, 60, 1920, 1020));
+        assert_eq!(workspace_offset(&primary, false), (0, 0));
+        assert_eq!(workspace_offset(&secondary, false), (0, 60));
+
+        // A 945x200 stub restored on the secondary keeps its width (over a
+        // third of 1920) and gets two thirds of the height, 680. Centered in
+        // the work area that is (3367, 230) on screen, (3367, 170) in that
+        // monitor's workspace coordinates.
+        let stub = rect(-32000, -32000, 945, 200);
+        assert_eq!(
+            restore_rect_on_monitor(stub, &secondary, false),
+            rect(3367, 170, 945, 680)
+        );
+        // On the primary, screen and workspace coordinates coincide.
+        assert_eq!(
+            restore_rect_on_monitor(stub, &primary, false),
+            rect(480, 300, 1920, 1200)
+        );
+    }
+
+    #[test]
+    fn keeps_tool_windows_in_screen_coordinates() {
+        let secondary = monitor(rect(2880, 0, 1920, 1080), rect(2960, 0, 1840, 1080));
+        assert_eq!(workspace_offset(&secondary, true), (0, 0));
+        let stub = rect(-32000, -32000, 945, 200);
+        // Centered in the work area right of an 80px bar along the left edge,
+        // and returned in screen coordinates.
+        assert_eq!(
+            restore_rect_on_monitor(stub, &secondary, true),
+            rect(3407, 180, 945, 720)
+        );
+    }
+
+    #[test]
+    fn keeps_a_usable_size_and_centers_it() {
+        let work = rect(0, 0, 2880, 1800);
+        assert_eq!(
+            on_screen_restore_rect(rect(-32000, -32000, 1200, 800), work),
+            rect(840, 500, 1200, 800)
+        );
+    }
+
+    #[test]
+    fn replaces_a_stub_size_with_two_thirds_of_the_work_area() {
+        // A Windows Terminal left at its minimum size at the parking spot.
+        let work = rect(0, 0, 2880, 1800);
+        assert_eq!(
+            on_screen_restore_rect(rect(-32000, -32000, 945, 200), work),
+            rect(480, 300, 1920, 1200)
+        );
+    }
+
+    #[test]
+    fn shrinks_an_oversized_window_to_the_work_area_of_its_monitor() {
+        let work = rect(2880, 100, 1920, 980);
+        assert_eq!(
+            on_screen_restore_rect(rect(-32000, -32000, 3000, 2000), work),
+            work
+        );
     }
 }
 
