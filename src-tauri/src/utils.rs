@@ -1162,6 +1162,43 @@ pub fn dock_enabled() -> bool {
     })
 }
 
+/// Makes a window click-through or not by its WS_EX_TRANSPARENT bit alone,
+/// keeping WS_EX_LAYERED set in both states.
+///
+/// tao's `set_ignore_cursor_events` sets both bits when ignoring and clears
+/// both otherwise. A window with a region (window_region.rs) that isn't
+/// layered loses its transparency: its clear pixels inside the region paint
+/// opaque. Writes only when the style differs, so it can be called on every
+/// cursor update, which also restores the bits if tao rewrites the extended
+/// style (it does on its own flag changes, such as show and hide). Returns
+/// whether it changed anything.
+pub fn set_click_through(hwnd: HWND, ignore: bool) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE,
+    };
+    unsafe {
+        let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        let wanted = click_through_style(current, ignore);
+        if wanted == current {
+            return false;
+        }
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, wanted as isize);
+        true
+    }
+}
+
+/// The extended style with WS_EX_LAYERED set and WS_EX_TRANSPARENT set only
+/// when ignoring input, every other bit kept.
+fn click_through_style(style: u32, ignore: bool) -> u32 {
+    use windows::Win32::UI::WindowsAndMessaging::{WS_EX_LAYERED, WS_EX_TRANSPARENT};
+    let layered = style | WS_EX_LAYERED.0;
+    if ignore {
+        layered | WS_EX_TRANSPARENT.0
+    } else {
+        layered & !WS_EX_TRANSPARENT.0
+    }
+}
+
 /// Re-assert HWND_TOPMOST without activating the window.
 ///
 /// Tauri's `set_always_on_top(true)` calls `SetWindowPos(HWND_TOPMOST)` without
@@ -1508,9 +1545,28 @@ pub fn capture_hwnd_to_base64(hwnd: HWND, max_width: u32, max_height: u32) -> Op
 #[cfg(test)]
 mod tests {
     use super::{
-        expand_env_vars, is_placed_rect, marker_contents, parse_marker_pid, parse_marker_rect,
-        parse_marker_secondaries, parse_marker_state,
+        click_through_style, expand_env_vars, is_placed_rect, marker_contents, parse_marker_pid,
+        parse_marker_rect, parse_marker_secondaries, parse_marker_state,
     };
+
+    #[test]
+    fn click_through_keeps_the_window_layered() {
+        const LAYERED: u32 = 0x0008_0000;
+        const TRANSPARENT: u32 = 0x0000_0020;
+        const NOACTIVATE: u32 = 0x0800_0000;
+        // tao's interactive style: neither bit. Taking clicks adds layered.
+        assert_eq!(click_through_style(NOACTIVATE, false), NOACTIVATE | LAYERED);
+        // Click-through adds both; other bits are kept.
+        assert_eq!(
+            click_through_style(NOACTIVATE, true),
+            NOACTIVATE | LAYERED | TRANSPARENT
+        );
+        // Back to taking clicks drops only the transparent bit.
+        assert_eq!(
+            click_through_style(NOACTIVATE | LAYERED | TRANSPARENT, false),
+            NOACTIVATE | LAYERED
+        );
+    }
     use std::collections::HashMap;
     static TEST_SETTINGS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

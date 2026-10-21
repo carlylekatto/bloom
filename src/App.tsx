@@ -6,6 +6,15 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getVersion } from "@tauri-apps/api/app";
 import type { UpdateCheckResult } from "./updater";
 import { batteryTooltip, type BatteryDetails } from "./batteryTooltip";
+import {
+	clipToWindow,
+	nextRegion,
+	notchPillBox,
+	onPixelRatioChange,
+	padRect,
+	type HeldRegion,
+	type RegionRect
+} from "./windowRegion";
 import "./App.css";
 import { initTheme } from "./theme";
 import {
@@ -736,6 +745,65 @@ function App() {
 	const musicBubbleRef = useRef<HTMLButtonElement>(null);
 	const shelfBubbleRef = useRef<HTMLButtonElement>(null);
 	const reportNotchRect = useRef<() => void>(() => {});
+	// The pill's target box in window CSS px, and the region last sent plus
+	// the earlier ones still held while an animation shrinks away from them.
+	const pillTargetRef = useRef<RegionRect | null>(null);
+	const notchRegionRef = useRef<{ key: string; current: RegionRect[]; held: HeldRegion[] }>({
+		key: "",
+		current: [],
+		held: []
+	});
+	const notchRegionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	// Recomputes the notch window's region from the pill's target box and the
+	// floating parts drawn around it, and sends it if it changed. Reads only
+	// refs and the DOM, so it is safe to call from any callback.
+	const updateNotchRegion = () => {
+		const width = window.innerWidth;
+		const height = window.innerHeight;
+		const wanted: RegionRect[] = [];
+		if (pillTargetRef.current) wanted.push(pillTargetRef.current);
+		// Each floating part, padded to cover what it paints outside its box: a
+		// tooltip card's shadow reaches 20px out plus a 6px drop, a bubble's
+		// glow less, and the screen corners nothing.
+		const extras: [Element | null, number][] = [
+			[musicBubbleRef.current, 16],
+			[shelfBubbleRef.current, 16],
+			...Array.from(document.querySelectorAll(".status-tooltip")).map((el): [Element, number] => [
+				el,
+				28
+			]),
+			...Array.from(document.querySelectorAll(".screen-corner")).map((el): [Element, number] => [
+				el,
+				0
+			])
+		];
+		for (const [el, pad] of extras) {
+			if (!el) continue;
+			const r = el.getBoundingClientRect();
+			wanted.push(padRect({ x: r.left, y: r.top, width: r.width, height: r.height }, pad));
+		}
+		const current = wanted
+			.map((r) => clipToWindow(r, width, height))
+			.filter((r): r is RegionRect => r !== null);
+
+		const next = nextRegion(
+			notchRegionRef.current,
+			current,
+			performance.now(),
+			700,
+			window.devicePixelRatio
+		);
+		notchRegionRef.current = next.state;
+		if (next.changed) {
+			invoke("set_window_region", { rects: next.rects }).catch(() => {});
+		}
+		if (notchRegionTimerRef.current) clearTimeout(notchRegionTimerRef.current);
+		notchRegionTimerRef.current =
+			next.nextExpiry === null
+				? null
+				: setTimeout(updateNotchRegion, next.nextExpiry - performance.now() + 5);
+	};
 	const [systemSettingsReady, setSystemSettingsReady] = useState(false);
 	const [waitForStartupSplash, setWaitForStartupSplash] = useState(false);
 	const initialSystemSyncDone = useRef(false);
@@ -808,6 +876,8 @@ function App() {
 						height: Math.round(bottom - top)
 					}
 				}).catch(() => {});
+				// Bubbles finishing their entrance land here too.
+				updateNotchRegion();
 			}
 		};
 
@@ -2912,6 +2982,42 @@ function App() {
 			setIconLabOpen((open) => !open);
 	}, []);
 
+	// The pill's target geometry: the animation springs toward it, and the
+	// window region below is cut from it, so the region is already at the
+	// final size while the pill animates.
+	const pillTargetY = !isReady ? 250 : isVisible ? (isHidden ? -100 : 0) : -150;
+	const pillTargetWidth = !isReady
+		? 34
+		: isExpanded && isVisible && !isHidden
+			? getDynamicWidth()
+			: isImpacted
+				? 39.1
+				: 30.6;
+	const pillTargetHeight = !isReady ? 34 : getDynamicHeight();
+	// Shadow and the edge flares beside the pill.
+	pillTargetRef.current = notchPillBox(
+		window.innerWidth,
+		scale,
+		pillTargetY,
+		pillTargetWidth,
+		pillTargetHeight,
+		24
+	);
+
+	// Clip the notch window to what it draws (see window_region.rs): outside
+	// these rectangles the window takes no clicks, whatever its click-through
+	// state. Sent after every render, but only when the region changes.
+	useEffect(() => {
+		if (windowLabel === "main") updateNotchRegion();
+	});
+
+	// A display scale change resizes the window in physical pixels without
+	// necessarily re-rendering, so the region is recomputed for it too.
+	useEffect(() => {
+		if (windowLabel !== "main") return;
+		return onPixelRatioChange(updateNotchRegion);
+	}, []);
+
 	return (
 		<div className="screen" style={{ overflow: "hidden" }}>
 			{/* The dev check has to sit here, not only inside the effect above.
@@ -2969,15 +3075,9 @@ function App() {
 						opacity: 0
 					}}
 					animate={{
-						y: !isReady ? 250 : isVisible ? (isHidden ? -100 : 0) : -150,
-						width: !isReady
-							? 34
-							: isExpanded && isVisible && !isHidden
-								? getDynamicWidth()
-								: isImpacted
-									? 39.1
-									: 30.6,
-						height: !isReady ? 34 : getDynamicHeight(),
+						y: pillTargetY,
+						width: pillTargetWidth,
+						height: pillTargetHeight,
 						opacity: isVisible ? 1 : 0,
 						scaleX: 1,
 						scaleY: 1,

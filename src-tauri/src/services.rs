@@ -2297,7 +2297,9 @@ fn apply_capture_ui_state(app: &AppHandle, active: bool) {
     }
     if let Some(main_win) = app.get_webview_window("main") {
         if active {
-            let _ = main_win.set_ignore_cursor_events(true);
+            if let Ok(hwnd) = main_win.hwnd() {
+                set_click_through(hwnd, true);
+            }
             let _ = main_win.hide();
         } else {
             let _ = main_win.show();
@@ -2604,13 +2606,13 @@ fn update_main_interaction(
         MH_TOP_EDGE_ENTER_MS.store(0, Ordering::Relaxed);
         MH_TOP_EDGE_ARMED.store(false, Ordering::Relaxed);
         if let Some(main_win) = app_handle.get_webview_window("main") {
-            if MH_LAST_MAIN_IGNORE.load(Ordering::Relaxed) != 1 {
-                if let Ok(hwnd) = main_win.hwnd() {
+            if let Ok(hwnd) = main_win.hwnd() {
+                if MH_LAST_MAIN_IGNORE.load(Ordering::Relaxed) != 1 {
                     re_assert_topmost(hwnd);
                 }
-                let _ = main_win.set_ignore_cursor_events(true);
-                MH_LAST_MAIN_IGNORE.store(1, Ordering::Relaxed);
+                set_click_through(hwnd, true);
             }
+            MH_LAST_MAIN_IGNORE.store(1, Ordering::Relaxed);
         }
         if MH_LAST_TOP_EDGE_HOVER.swap(0, Ordering::Relaxed) != 0 {
             let _ = app_handle.emit("notch-edge-hover", false);
@@ -2736,7 +2738,6 @@ fn update_main_interaction(
                 re_assert_topmost(hwnd);
             }
         }
-        let _ = main_win.set_ignore_cursor_events(final_ignore);
         MH_LAST_MAIN_IGNORE.store(new_ignore, Ordering::Relaxed);
         // Once the window is click-through the webview can never receive the
         // mouseleave that would clear its hover state (it may already have
@@ -2745,6 +2746,12 @@ fn update_main_interaction(
         if new_ignore == 1 && NOTCH_IS_HOVERED.swap(false, Ordering::Relaxed) {
             let _ = app_handle.emit("notch-pointer-left", ());
         }
+    }
+    // Applied on every update, not only on a change: it writes only when the
+    // window's actual style differs, so it also repairs a style that tao
+    // rewrote behind the cache's back.
+    if let Ok(hwnd) = main_win.hwnd() {
+        set_click_through(hwnd, final_ignore);
     }
 }
 
@@ -3059,12 +3066,13 @@ fn process_mouse_position(app_handle: &AppHandle, cursor: windows::Win32::Founda
         // While a capture UI (Snipping Tool) is up, Bloom is fully
         // click-through and skipped entirely so the tool owns the screen.
         if CAPTURE_UI_ACTIVE.load(Ordering::Relaxed) {
-            if MH_LAST_MAIN_IGNORE.load(Ordering::Relaxed) != 1 {
-                if let Some(w) = app_handle.get_webview_window("main") {
-                    let _ = w.set_ignore_cursor_events(true);
-                }
-                MH_LAST_MAIN_IGNORE.store(1, Ordering::Relaxed);
+            if let Some(hwnd) = app_handle
+                .get_webview_window("main")
+                .and_then(|w| w.hwnd().ok())
+            {
+                set_click_through(hwnd, true);
             }
+            MH_LAST_MAIN_IGNORE.store(1, Ordering::Relaxed);
             if MH_LAST_DOCK_IGNORE.load(Ordering::Relaxed) != 1 {
                 if let Some(w) = app_handle.get_webview_window("dock") {
                     let _ = w.set_ignore_cursor_events(true);

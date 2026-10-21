@@ -15,6 +15,7 @@ mod types;
 mod updater;
 mod utils;
 mod wifi;
+mod window_region;
 
 use std::sync::atomic::Ordering;
 use tauri::Manager;
@@ -157,6 +158,7 @@ fn main() {
             launch_new_instance,
             update_dock_rect,
             update_notch_rect,
+            window_region::set_window_region,
             set_dock_hovered,
             set_notch_hovered,
             set_notch_visible,
@@ -265,6 +267,13 @@ fn main() {
             }
 
             let window = app.get_webview_window("main").unwrap();
+            // tao rebuilds the extended style from its own flags whenever one
+            // changes (show, hide, ...). With its ignore-cursor flag on, every
+            // rebuild keeps the notch window layered, which its window region
+            // needs to stay transparent; set_click_through then drives the
+            // click-through bit directly. The worst a rebuild does is make the
+            // window click-through until the next cursor update.
+            let _ = window.set_ignore_cursor_events(true);
             let dock_win = app.get_webview_window("dock").unwrap();
 
             // Sync window rects initially and on event
