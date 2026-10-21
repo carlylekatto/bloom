@@ -363,6 +363,9 @@ fn main() {
             // take effect on a window that has never been shown. Show it once
             // to register it with the compositor, then hide immediately.
             if let Some(ov_win) = app.get_webview_window("overlay") {
+                // Layered from the start, like the notch and dock (see
+                // set_click_through): the overlay has a window region too.
+                let _ = ov_win.set_ignore_cursor_events(true);
                 let _ = ov_win.show();
                 let _ = ov_win.hide();
                 let overlay_handle = app.handle().clone();

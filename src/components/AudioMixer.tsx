@@ -27,11 +27,19 @@ export interface AudioSession {
 // Panel geometry. The expanded card grows with the number of apps (one narrow
 // column each) up to a max, so a single app doesn't open a wide card.
 // `MIXER_PANEL_PADDING` must match the horizontal padding on .volume-mixer-list.
-const MIXER_COLUMN_WIDTH = 44;
-const MIXER_COLUMN_GAP = 4;
-const MIXER_PANEL_PADDING = 8;
-const MIXER_MAX_COLUMNS = 4;
+export const MIXER_COLUMN_WIDTH = 44;
+export const MIXER_COLUMN_GAP = 4;
+export const MIXER_PANEL_PADDING = 8;
+export const MIXER_MAX_COLUMNS = 4;
 const MIXER_EMPTY_COLUMNS = 2;
+
+// The widest the mixer panel gets, for the overlay's window region. It lives
+// here rather than in Overlay.tsx so the region is cut from the same numbers
+// the panel is laid out with, and the two cannot drift apart.
+export const MIXER_MAX_PANEL_WIDTH =
+	MIXER_PANEL_PADDING * 2 +
+	MIXER_MAX_COLUMNS * MIXER_COLUMN_WIDTH +
+	(MIXER_MAX_COLUMNS - 1) * MIXER_COLUMN_GAP;
 
 // Last fetched session list, so reopening the mixer renders at the right width
 // immediately instead of growing out of the empty-state width.

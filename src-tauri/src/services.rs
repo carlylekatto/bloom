@@ -2310,8 +2310,11 @@ fn apply_capture_ui_state(app: &AppHandle, active: bool) {
         if let Some(hwnd) = app.get_webview_window("dock").and_then(|w| w.hwnd().ok()) {
             set_click_through(hwnd, true);
         }
-        if let Some(ov_win) = app.get_webview_window("overlay") {
-            let _ = ov_win.set_ignore_cursor_events(true);
+        if let Some(hwnd) = app
+            .get_webview_window("overlay")
+            .and_then(|w| w.hwnd().ok())
+        {
+            set_click_through(hwnd, true);
         }
     }
     // Force the mouse hook to re-evaluate hit-testing on the next move.
@@ -3142,8 +3145,11 @@ fn process_mouse_position(app_handle: &AppHandle, cursor: windows::Win32::Founda
             }
             MH_LAST_DOCK_IGNORE.store(1, Ordering::Relaxed);
             if MH_LAST_OV_IGNORE.load(Ordering::Relaxed) != 1 {
-                if let Some(w) = app_handle.get_webview_window("overlay") {
-                    let _ = w.set_ignore_cursor_events(true);
+                if let Some(hwnd) = app_handle
+                    .get_webview_window("overlay")
+                    .and_then(|w| w.hwnd().ok())
+                {
+                    set_click_through(hwnd, true);
                 }
                 MH_LAST_OV_IGNORE.store(1, Ordering::Relaxed);
             }
@@ -3267,13 +3273,13 @@ fn process_mouse_position(app_handle: &AppHandle, cursor: windows::Win32::Founda
         if let Some(ov_win) = app_handle.get_webview_window("overlay") {
             if fg_fs {
                 let prev = MH_LAST_OV_IGNORE.load(Ordering::Relaxed);
-                if prev != 1 {
-                    if let Ok(hwnd) = ov_win.hwnd() {
+                if let Ok(hwnd) = ov_win.hwnd() {
+                    if prev != 1 {
                         re_assert_topmost(hwnd);
                     }
-                    let _ = ov_win.set_ignore_cursor_events(true);
-                    MH_LAST_OV_IGNORE.store(1, Ordering::Relaxed);
+                    set_click_through(hwnd, true);
                 }
+                MH_LAST_OV_IGNORE.store(1, Ordering::Relaxed);
             } else {
                 // The overlay applies `bloom-scale` as CSS zoom, so the cards
                 // are larger than 42x196 CSS px for non-default scales.
@@ -3315,8 +3321,11 @@ fn process_mouse_position(app_handle: &AppHandle, cursor: windows::Win32::Founda
                     if let Ok(hwnd) = ov_win.hwnd() {
                         re_assert_topmost(hwnd);
                     }
-                    let _ = ov_win.set_ignore_cursor_events(should_ignore);
                     MH_LAST_OV_IGNORE.store(new_val, Ordering::Relaxed);
+                }
+                // Every update, as for the notch and dock.
+                if let Ok(hwnd) = ov_win.hwnd() {
+                    set_click_through(hwnd, should_ignore);
                 }
             }
         }
