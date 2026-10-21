@@ -3924,9 +3924,39 @@ fn collect_shortcuts(dir: &std::path::Path, apps: &mut Vec<AppInfo>, depth: i32)
                         all_hwnds: None,
                     });
                 }
+            } else if is_web_app_shortcut(&path, depth) {
+                // Keep the .url itself: Windows opens it in the default browser
+                // and reads its icon from the IconFile it names.
+                let name = path.file_stem().unwrap().to_string_lossy().to_string();
+                let path_str = path.to_string_lossy().to_string();
+                if !is_helper_name(&name)
+                    && !apps.iter().any(|a| a.name == name || a.path == path_str)
+                {
+                    apps.push(AppInfo {
+                        name,
+                        path: path_str,
+                        icon: None,
+                        is_running: false,
+                        hwnd: None,
+                        executable: None,
+                        all_hwnds: None,
+                    });
+                }
             }
         }
     }
+}
+
+/// A website shortcut that stands for a web app: a `.url` placed directly in
+/// a Start menu `Programs` folder, beside the apps (Google Messages and Google
+/// Meet come preinstalled like this). Website links inside an app's own folder
+/// ("Node.js website", "Git FAQs") are its documentation and stay out, as do
+/// the same sites' entries in the apps list, which only carry the address.
+fn is_web_app_shortcut(path: &std::path::Path, depth: i32) -> bool {
+    depth == 0
+        && path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("url"))
 }
 
 pub fn sync_overlays(app: &AppHandle) {
@@ -5013,8 +5043,9 @@ mod tests {
 
     use super::{
         cursor_in_menu_rect, dock_span_px, is_helper_name, is_launchable_entry, is_primary_monitor,
-        is_start_menu_process_path, notch_mode_reserves_work_area, pack_cursor, process_exe_name,
-        trim_thumbnail_cache, unpack_cursor, win_number_index, window_reaches_dock,
+        is_start_menu_process_path, is_web_app_shortcut, notch_mode_reserves_work_area,
+        pack_cursor, process_exe_name, trim_thumbnail_cache, unpack_cursor, win_number_index,
+        window_reaches_dock,
     };
     use crate::types::IntRect;
 
@@ -5116,6 +5147,23 @@ mod tests {
         assert_eq!(found.as_deref(), Some(expected.as_str()));
         // Process IDs are multiples of 4, so this one is never in use.
         assert_eq!(unsafe { process_exe_name(u32::MAX - 3) }, None);
+    }
+
+    #[test]
+    fn lists_website_shortcuts_beside_the_apps_as_web_apps() {
+        let programs =
+            std::path::Path::new(r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs");
+        assert!(is_web_app_shortcut(
+            &programs.join("Google Messages.url"),
+            0
+        ));
+        assert!(is_web_app_shortcut(&programs.join("Site.URL"), 0));
+        // A link in an app's own folder is its documentation.
+        assert!(!is_web_app_shortcut(
+            &programs.join("Node.js").join("Node.js website.url"),
+            1
+        ));
+        assert!(!is_web_app_shortcut(&programs.join("Discord.lnk"), 0));
     }
 
     #[test]

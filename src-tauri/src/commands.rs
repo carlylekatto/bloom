@@ -1492,6 +1492,15 @@ unsafe fn pwa_icon_for_window(hwnd: HWND, process_path: &str) -> Option<String> 
                     }
                 }
             }
+            // Chrome shortens the app id in a window's AppUserModelID
+            // ("Chrome._crx_eppojlglocmnohnlnionkobfln" for Netflix), so it can't
+            // name the profile folder. The browser registers the app under that
+            // same id in Start, though, and the shell has its icon.
+            if id.contains("_crx_") {
+                if let Some(icon) = icon_from_aumid(&id) {
+                    return Some(icon);
+                }
+            }
             if let Some(command_line) = process_command_line(pid) {
                 if let Some(icon) = pwa_icon_from_command_line(process_path, &command_line) {
                     return Some(icon);
