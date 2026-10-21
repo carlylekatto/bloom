@@ -1514,9 +1514,13 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
                     let title = String::from_utf16_lossy(&text[..text_len as usize]);
 
                     let is_desktop = class_str == "Progman" || class_str == "WorkerW";
-                    let is_start = (class_str == "Windows.UI.Core.CoreWindow"
-                        || class_str == "SimpleWindow")
-                        && (title == "Start" || title == "Search");
+                    let is_start_class =
+                        class_str == "Windows.UI.Core.CoreWindow" || class_str == "SimpleWindow";
+                    let mut process_id = 0u32;
+                    GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+                    let is_start = is_start_class
+                        && ((title == "Start" || title == "Search")
+                            || is_start_menu_process(process_id));
                     let is_shell = class_str == "Shell_TrayWnd"
                         || class_str == "Shell_SecondaryTrayWnd"
                         || is_start;
@@ -1558,6 +1562,7 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
 
                                 if GetMonitorInfoA(h_monitor, &mut mi).as_bool() {
                                     let screen_rect = mi.rcMonitor;
+                                    let is_primary = is_primary_monitor(mi.dwFlags);
                                     let is_maximized =
                                         IsZoomed(hwnd).as_bool() || (style & WS_MAXIMIZE.0) != 0;
                                     let is_maximized_standard =
@@ -1589,10 +1594,11 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
                                         && rect.bottom >= screen_rect.bottom;
 
                                     // Truly fullscreen means client covers screen, OR window matches screen but is not just a standard maximized window
-                                    current_is_fs = (is_client_fullscreen || is_matches_screen)
+                                    current_is_fs = is_primary
+                                        && (is_client_fullscreen || is_matches_screen)
                                         && !is_maximized_standard;
 
-                                    if current_is_fs || is_maximized {
+                                    if is_primary && (current_is_fs || is_maximized) {
                                         should_overlap = true;
                                         should_notch_overlap = true;
                                         // Standard maximized windows leave the dock's
@@ -1600,7 +1606,7 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
                                         // can stretch to a full taskbar. True fullscreen
                                         // windows cover the screen and should not.
                                         should_maximized = is_maximized && !current_is_fs;
-                                    } else {
+                                    } else if is_primary {
                                         should_overlap = false;
                                         if let Ok(dock_rect_lock) = DOCK_RECT.lock() {
                                             if let Some(dr) = *dock_rect_lock {
@@ -2078,6 +2084,45 @@ static MH_CACHED_MON_SIZE: Mutex<Option<(u32, u32)>> = Mutex::new(None);
 static CAPTURE_UI_ACTIVE: AtomicBool = AtomicBool::new(false);
 static CAPTURE_RECHECK: AtomicBool = AtomicBool::new(true);
 static CAPTURE_LAST_SCAN_MS: AtomicI64 = AtomicI64::new(0);
+
+/// Recognizes the native Start/Search surface by its host process. Its window
+/// title is localized, so title-only checks make Smart dock overlap detection
+/// hide the dock on non-English Windows.
+fn is_start_menu_process(process_id: u32) -> bool {
+    if process_id == 0 {
+        return false;
+    }
+    unsafe {
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) else {
+            return false;
+        };
+        let mut buffer = [0u16; 512];
+        let mut length = buffer.len() as u32;
+        let found = QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_WIN32,
+            windows::core::PWSTR(buffer.as_mut_ptr()),
+            &mut length,
+        )
+        .is_ok()
+            && is_start_menu_process_path(&String::from_utf16_lossy(&buffer[..length as usize]));
+        let _ = CloseHandle(process);
+        found
+    }
+}
+
+fn is_start_menu_process_path(path: &str) -> bool {
+    let name = Path::new(path).file_name().and_then(|name| name.to_str());
+    name.is_some_and(|name| {
+        name.eq_ignore_ascii_case("StartMenuExperienceHost.exe")
+            || name.eq_ignore_ascii_case("SearchHost.exe")
+    })
+}
+
+fn is_primary_monitor(flags: u32) -> bool {
+    const PRIMARY_MONITOR_FLAG: u32 = 1;
+    flags & PRIMARY_MONITOR_FLAG != 0
+}
 
 /// Hover-intent ("pressure") gate for the top edge. Contact with the top band
 /// only starts a dwell clock; the edge is armed — and only then peeks the notch
@@ -4556,8 +4601,9 @@ fn recover_from_webview_failure(handle: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        cursor_in_menu_rect, is_helper_name, is_launchable_entry, notch_mode_reserves_work_area,
-        pack_cursor, trim_thumbnail_cache, unpack_cursor, win_number_index,
+        cursor_in_menu_rect, is_helper_name, is_launchable_entry, is_primary_monitor,
+        is_start_menu_process_path, notch_mode_reserves_work_area, pack_cursor,
+        trim_thumbnail_cache, unpack_cursor, win_number_index,
     };
 
     /// The dock reports its menu in logical webview pixels, so the same click
@@ -4610,6 +4656,23 @@ mod tests {
             1.0,
             5.0
         ));
+    }
+
+    #[test]
+    fn recognizes_start_menu_hosts_without_relying_on_localized_titles() {
+        assert!(is_start_menu_process_path(
+            r"C:\Windows\SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\SearchHost.exe"
+        ));
+        assert!(is_start_menu_process_path(
+            r"C:\Windows\SystemApps\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\StartMenuExperienceHost.exe"
+        ));
+        assert!(!is_start_menu_process_path(r"C:\Windows\explorer.exe"));
+    }
+
+    #[test]
+    fn overlap_detection_is_limited_to_the_primary_monitor() {
+        assert!(is_primary_monitor(1));
+        assert!(!is_primary_monitor(0));
     }
 
     #[test]
