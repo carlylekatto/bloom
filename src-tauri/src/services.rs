@@ -4265,10 +4265,61 @@ pub unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> B
                     }
                 }
                 let _ = CloseHandle(process_handle);
+            } else if process_exe_name(process_id)
+                .is_some_and(|exe| exe.eq_ignore_ascii_case("consent.exe"))
+            {
+                // A UAC prompt that Windows parked because the program asking
+                // for elevation wasn't in the foreground. The taskbar shows it
+                // as a flashing button; with the taskbar hidden, the dock is
+                // the only place to reach it besides Alt+Tab. consent.exe runs
+                // as SYSTEM, so Bloom can't open it to read its path.
+                if !apps.iter().any(|a| a.hwnd == Some(hwnd.0 as isize)) {
+                    let system_root =
+                        std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+                    apps.push(AppInfo {
+                        name: title,
+                        path: format!(r"{system_root}\System32\consent.exe"),
+                        icon: None,
+                        is_running: true,
+                        hwnd: Some(hwnd.0 as isize),
+                        executable: Some("consent.exe".into()),
+                        all_hwnds: None,
+                    });
+                }
             }
         }
     }
     true.into()
+}
+
+/// The executable name of a process Bloom can't open, such as one running as
+/// SYSTEM, from the system's process list, which needs no access to it.
+unsafe fn process_exe_name(process_id: u32) -> Option<String> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..Default::default()
+    };
+    let mut found = None;
+    let mut more = Process32FirstW(snapshot, &mut entry).is_ok();
+    while more {
+        if entry.th32ProcessID == process_id {
+            let len = entry
+                .szExeFile
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(entry.szExeFile.len());
+            found = Some(String::from_utf16_lossy(&entry.szExeFile[..len]));
+            break;
+        }
+        more = Process32NextW(snapshot, &mut entry).is_ok();
+    }
+    let _ = CloseHandle(snapshot);
+    found
 }
 
 pub fn unregister_appbar_native(hwnd: HWND) {
@@ -4610,7 +4661,7 @@ fn recover_from_webview_failure(handle: &AppHandle) {
 mod tests {
     use super::{
         cursor_in_menu_rect, is_helper_name, is_launchable_entry, is_primary_monitor,
-        is_start_menu_process_path, notch_mode_reserves_work_area, pack_cursor,
+        is_start_menu_process_path, notch_mode_reserves_work_area, pack_cursor, process_exe_name,
         trim_thumbnail_cache, unpack_cursor, win_number_index,
     };
 
@@ -4664,6 +4715,16 @@ mod tests {
             1.0,
             5.0
         ));
+    }
+
+    #[test]
+    fn names_a_process_from_the_process_list() {
+        let own = std::env::current_exe().unwrap();
+        let expected = own.file_name().unwrap().to_string_lossy().to_string();
+        let found = unsafe { process_exe_name(std::process::id()) };
+        assert_eq!(found.as_deref(), Some(expected.as_str()));
+        // Process IDs are multiples of 4, so this one is never in use.
+        assert_eq!(unsafe { process_exe_name(u32::MAX - 3) }, None);
     }
 
     #[test]
