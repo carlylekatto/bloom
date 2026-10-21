@@ -1435,8 +1435,12 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
 
                 // Find the first meaningful window for overlap detection.
                 // We skip Bloom windows, invisible windows, minimized windows, and 'cloaked' system ghosts.
+                // On systems with many top-level shell/helper windows, the app can be
+                // far down the Z-order. Keep a generous bound, but never treat the
+                // unchecked window at the bound as a valid foreground window.
                 let mut check_count = 0;
-                while !hwnd.is_invalid() && check_count < 15 {
+                let mut found_window = false;
+                while !hwnd.is_invalid() && check_count < 512 {
                     let mut process_id = 0u32;
                     GetWindowThreadProcessId(hwnd, Some(&mut process_id));
 
@@ -1481,8 +1485,12 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
                         .unwrap_or_default();
                         check_count += 1;
                     } else {
+                        found_window = true;
                         break;
                     }
+                }
+                if !found_window {
+                    hwnd = HWND(std::ptr::null_mut());
                 }
 
                 let mut should_overlap = false;
