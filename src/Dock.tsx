@@ -11,6 +11,7 @@ import { reloadIfMirrorWasStale } from "./hooks/settingsMirror";
 
 import { mergeTrayApps, selectDockTrayApps, type AppInfo, type TrayApp } from "./dockApps";
 import { driveLetter, hideDrive, removeCustomFolder, type DockExtra } from "./dockExtras";
+import { createRegionSender, measureElements, padRect, type RegionRect } from "./windowRegion";
 
 // Host processes (Edge/Chrome/Brave/ApplicationFrameHost) run every PWA/UWP
 // window, so their window title must be part of their identity — otherwise two
@@ -907,6 +908,71 @@ const Dock = memo(function Dock() {
 		setShowAddPopup(false);
 		invoke("set_menu_open", { open: false, rect: null }).catch(() => {});
 	};
+
+	// A press outside the dock while a menu or the Add App popup is open. The
+	// click itself goes to whatever is under it (the window region keeps the
+	// dock out of the way), so the backend's mouse hook reports it instead.
+	useEffect(() => {
+		const unlisten = listen("dock-dismiss-menu", () => {
+			setContextMenu(null);
+			setActiveSubmenu(null);
+			setShowAddPopup(false);
+		});
+		return () => {
+			unlisten.then((f) => f());
+		};
+	}, []);
+
+	// The tallest the expanded bar has been, which sets the region's bottom band.
+	const dockBandHeightRef = useRef(0);
+	const sendDockRegion = useMemo(
+		() =>
+			createRegionSender((rects) => {
+				invoke("set_window_region", { rects }).catch(() => {});
+			}),
+		[]
+	);
+
+	// Clip the dock window to what it draws (see window_region.rs). The bar
+	// gets a full-width band along the bottom, as tall as the expanded bar plus
+	// room for the icons' lift and tooltips above it, so its reveal and width
+	// animations are never clipped; the click-through switching still keeps
+	// the band clear unless the cursor is at the dock. The floating parts are
+	// measured, padded for their shadows. While an icon is dragged the whole
+	// window is included so the dragged icon isn't clipped.
+	useEffect(() => {
+		const bar = dockRef.current?.getBoundingClientRect();
+		if (bar && isExpanded && !isHidden && isVisible) {
+			dockBandHeightRef.current = Math.max(dockBandHeightRef.current, bar.height);
+		}
+		const band = (dockBandHeightRef.current || 72 * scale) + 64 * scale;
+		const wanted: RegionRect[] = [
+			{ x: 0, y: window.innerHeight - band, width: window.innerWidth, height: band }
+		];
+		if (isDragging) {
+			wanted.push({ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight });
+		}
+		wanted.push(
+			...measureElements([
+				[".preview-tooltip", 40],
+				[".context-menu", 34],
+				[".submenu", 34],
+				[".dock-toast", 20]
+			])
+		);
+		// The Add App popup grows from scaleY 0, and that animation doesn't
+		// re-render the dock, so its own box would be measured collapsed. Its
+		// anchor isn't transformed and is exactly as tall as the open popup, so
+		// the height comes from there and the width from the popup itself.
+		const popup = popupRef.current;
+		const anchor = popup?.parentElement;
+		if (popup && anchor) {
+			const p = popup.getBoundingClientRect();
+			const a = anchor.getBoundingClientRect();
+			wanted.push(padRect({ x: p.left, y: a.top, width: p.width, height: a.height }, 40));
+		}
+		sendDockRegion(wanted);
+	});
 
 	useEffect(() => {
 		let open = false;

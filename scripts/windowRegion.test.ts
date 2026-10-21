@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	clipToWindow,
+	createRegionSender,
 	nextRegion,
 	notchPillBox,
 	padRect,
@@ -68,6 +69,40 @@ describe("window region", () => {
 		expect(settled.rects).toEqual(small);
 		expect(settled.changed).toBe(true);
 		expect(settled.nextExpiry).toBeNull();
+	});
+
+	test("the sender clips to the window and sends only changes", () => {
+		// The display scale's media query, fired by hand below.
+		let scaleChanged = () => {};
+		const fakeWindow = {
+			innerWidth: 1000,
+			innerHeight: 500,
+			devicePixelRatio: 1,
+			matchMedia: () => ({
+				addEventListener: (_: string, listener: () => void) => {
+					scaleChanged = listener;
+				},
+				removeEventListener: () => {}
+			})
+		};
+		(globalThis as { window?: unknown }).window = fakeWindow;
+		const sent: unknown[] = [];
+		const send = createRegionSender((rects) => sent.push(rects), 700);
+		const band = { x: 0, y: 400, width: 1000, height: 150 };
+		send([band]);
+		// Clipped to the 500px-tall window.
+		const clipped = [{ x: 0, y: 400, width: 1000, height: 100 }];
+		expect(sent).toEqual([clipped]);
+		send([band]);
+		expect(sent.length).toBe(1);
+		// Off-window rectangles drop out; the region doesn't change.
+		send([band, { x: 0, y: 600, width: 10, height: 10 }]);
+		expect(sent.length).toBe(1);
+		// A display scale change re-sends the same CSS rectangles by itself, so
+		// the backend can convert them at the new scale.
+		fakeWindow.devicePixelRatio = 1.5;
+		scaleChanged();
+		expect(sent).toEqual([clipped, clipped]);
 	});
 
 	test("reports no change when nothing moved", () => {

@@ -1,5 +1,5 @@
 import { motion, AnimatePresence, useAnimation } from "framer-motion";
-import { useEffect, useLayoutEffect, useState, useCallback, useRef, memo } from "react";
+import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, memo } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -7,12 +7,9 @@ import { getVersion } from "@tauri-apps/api/app";
 import type { UpdateCheckResult } from "./updater";
 import { batteryTooltip, type BatteryDetails } from "./batteryTooltip";
 import {
-	clipToWindow,
-	nextRegion,
+	createRegionSender,
+	measureElements,
 	notchPillBox,
-	onPixelRatioChange,
-	padRect,
-	type HeldRegion,
 	type RegionRect
 } from "./windowRegion";
 import "./App.css";
@@ -745,64 +742,34 @@ function App() {
 	const musicBubbleRef = useRef<HTMLButtonElement>(null);
 	const shelfBubbleRef = useRef<HTMLButtonElement>(null);
 	const reportNotchRect = useRef<() => void>(() => {});
-	// The pill's target box in window CSS px, and the region last sent plus
-	// the earlier ones still held while an animation shrinks away from them.
+	// The pill's target box in window CSS px, and the sender that applies the
+	// notch window's region (holding earlier regions while it shrinks).
 	const pillTargetRef = useRef<RegionRect | null>(null);
-	const notchRegionRef = useRef<{ key: string; current: RegionRect[]; held: HeldRegion[] }>({
-		key: "",
-		current: [],
-		held: []
-	});
-	const notchRegionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const sendNotchRegion = useMemo(
+		() =>
+			createRegionSender((rects) => {
+				invoke("set_window_region", { rects }).catch(() => {});
+			}),
+		[]
+	);
 
 	// Recomputes the notch window's region from the pill's target box and the
 	// floating parts drawn around it, and sends it if it changed. Reads only
 	// refs and the DOM, so it is safe to call from any callback.
 	const updateNotchRegion = () => {
-		const width = window.innerWidth;
-		const height = window.innerHeight;
 		const wanted: RegionRect[] = [];
 		if (pillTargetRef.current) wanted.push(pillTargetRef.current);
 		// Each floating part, padded to cover what it paints outside its box: a
 		// tooltip card's shadow reaches 20px out plus a 6px drop, a bubble's
 		// glow less, and the screen corners nothing.
-		const extras: [Element | null, number][] = [
-			[musicBubbleRef.current, 16],
-			[shelfBubbleRef.current, 16],
-			...Array.from(document.querySelectorAll(".status-tooltip")).map((el): [Element, number] => [
-				el,
-				28
-			]),
-			...Array.from(document.querySelectorAll(".screen-corner")).map((el): [Element, number] => [
-				el,
-				0
+		wanted.push(
+			...measureElements([
+				[".activity-bubble", 16],
+				[".status-tooltip", 28],
+				[".screen-corner", 0]
 			])
-		];
-		for (const [el, pad] of extras) {
-			if (!el) continue;
-			const r = el.getBoundingClientRect();
-			wanted.push(padRect({ x: r.left, y: r.top, width: r.width, height: r.height }, pad));
-		}
-		const current = wanted
-			.map((r) => clipToWindow(r, width, height))
-			.filter((r): r is RegionRect => r !== null);
-
-		const next = nextRegion(
-			notchRegionRef.current,
-			current,
-			performance.now(),
-			700,
-			window.devicePixelRatio
 		);
-		notchRegionRef.current = next.state;
-		if (next.changed) {
-			invoke("set_window_region", { rects: next.rects }).catch(() => {});
-		}
-		if (notchRegionTimerRef.current) clearTimeout(notchRegionTimerRef.current);
-		notchRegionTimerRef.current =
-			next.nextExpiry === null
-				? null
-				: setTimeout(updateNotchRegion, next.nextExpiry - performance.now() + 5);
+		sendNotchRegion(wanted);
 	};
 	const [systemSettingsReady, setSystemSettingsReady] = useState(false);
 	const [waitForStartupSplash, setWaitForStartupSplash] = useState(false);
@@ -3010,13 +2977,6 @@ function App() {
 	useEffect(() => {
 		if (windowLabel === "main") updateNotchRegion();
 	});
-
-	// A display scale change resizes the window in physical pixels without
-	// necessarily re-rendering, so the region is recomputed for it too.
-	useEffect(() => {
-		if (windowLabel !== "main") return;
-		return onPixelRatioChange(updateNotchRegion);
-	}, []);
 
 	return (
 		<div className="screen" style={{ overflow: "hidden" }}>

@@ -2,7 +2,7 @@ use crate::types::{AppInfo, IntRect, SystemCommand};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use std::sync::{
-    atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU32},
+    atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicIsize, AtomicU32},
     Mutex, OnceLock,
 };
 use tauri::{AppHandle, PhysicalPosition, PhysicalSize};
@@ -29,6 +29,9 @@ pub static NOTCH_IS_HOVERED: AtomicBool = AtomicBool::new(false);
 /// smart/peek mode the notch must stay click-through even over its footprint.
 pub static NOTCH_IS_VISIBLE: AtomicBool = AtomicBool::new(true);
 pub static MENU_IS_OPEN: AtomicBool = AtomicBool::new(false);
+// The dock window's handle, for the mouse hook to tell whether a press lands
+// on the dock (which closes its own menus) or outside it.
+pub static DOCK_HWND: AtomicIsize = AtomicIsize::new(0);
 pub static MENU_RECT: Mutex<Option<IntRect>> = Mutex::new(None);
 pub static ICON_CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 

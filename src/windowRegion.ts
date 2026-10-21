@@ -80,6 +80,47 @@ export function onPixelRatioChange(callback: () => void): () => void {
 	return () => query?.removeEventListener("change", changed);
 }
 
+/**
+ * Boxes for elements matching each selector, padded per selector for the
+ * shadow or glow they paint outside themselves.
+ */
+export function measureElements(selectors: [string, number][]): RegionRect[] {
+	return selectors.flatMap(([selector, pad]) =>
+		Array.from(document.querySelectorAll(selector)).map((el) => {
+			const r = el.getBoundingClientRect();
+			return padRect({ x: r.left, y: r.top, width: r.width, height: r.height }, pad);
+		})
+	);
+}
+
+/**
+ * Feeds the rectangles a window needs into `nextRegion` and calls `send` with
+ * the region whenever it changes, recomputing on its own when a held region
+ * expires or the display scale changes. Rectangles are clipped to the window
+ * first. Meant to live as long as its window.
+ */
+export function createRegionSender(send: (rects: RegionRect[]) => void, holdMs = 700) {
+	let state: RegionState = { key: "", current: [], held: [] };
+	let latest: RegionRect[] = [];
+	let timer: ReturnType<typeof setTimeout> | null = null;
+	const update = (wanted: RegionRect[]) => {
+		latest = wanted;
+		const current = wanted
+			.map((r) => clipToWindow(r, window.innerWidth, window.innerHeight))
+			.filter((r): r is RegionRect => r !== null);
+		const next = nextRegion(state, current, performance.now(), holdMs, window.devicePixelRatio);
+		state = next.state;
+		if (next.changed) send(next.rects);
+		if (timer) clearTimeout(timer);
+		timer =
+			next.nextExpiry === null
+				? null
+				: setTimeout(() => update(latest), next.nextExpiry - performance.now() + 5);
+	};
+	onPixelRatioChange(() => update(latest));
+	return update;
+}
+
 function regionKey(rects: RegionRect[]): string {
 	return rects.map((r) => `${r.x},${r.y},${r.width},${r.height}`).join(";");
 }

@@ -275,6 +275,11 @@ fn main() {
             // window click-through until the next cursor update.
             let _ = window.set_ignore_cursor_events(true);
             let dock_win = app.get_webview_window("dock").unwrap();
+            // Same for the dock window, which has a region too.
+            let _ = dock_win.set_ignore_cursor_events(true);
+            if let Ok(hwnd) = dock_win.hwnd() {
+                DOCK_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
+            }
 
             // Sync window rects initially and on event
             let win_clone = window.clone();
