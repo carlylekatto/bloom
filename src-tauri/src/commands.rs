@@ -1896,6 +1896,10 @@ pub async fn get_app_icon(
             // A shortcut can carry its own icon file (Firefox web apps, user edits).
             let mut icon_data = if is_lnk {
                 get_shortcut_icon_location(&path_clone).and_then(|p| image_file_to_base64(&p))
+            } else if path_clone.to_lowercase().ends_with(".url") {
+                // A web app installed as an Internet shortcut names its icon file.
+                crate::utils::url_shortcut_icon_file(&path_clone)
+                    .and_then(|p| image_file_to_base64(&p))
             } else {
                 None
             };
