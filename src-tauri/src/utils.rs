@@ -940,6 +940,59 @@ fn known_install_location(file: &str) -> Option<String> {
 /// the browser's web app id. Unlike the process command line it is always
 /// available on the window itself.
 pub fn get_window_app_user_model_id(hwnd: HWND) -> Option<String> {
+    get_window_string_property(hwnd, 5)
+}
+
+/// Reads the `System.AppUserModel.RelaunchCommand` shell property of a window:
+/// the command the taskbar pins and relaunches for it. Apps whose UI window is
+/// owned by a helper process set it to their real executable (Steam's window
+/// belongs to steamwebhelper.exe but relaunches Steam.exe).
+pub fn get_window_relaunch_command(hwnd: HWND) -> Option<String> {
+    get_window_string_property(hwnd, 2)
+}
+
+/// The executable named by a relaunch command, when the command is a bare,
+/// existing `.exe` path without arguments. Commands with arguments (browser
+/// profiles, launchers) are not an app identity and are ignored.
+pub fn relaunch_executable(command: &str) -> Option<String> {
+    let command = command.trim();
+    let exe = match command.strip_prefix('"') {
+        Some(rest) => {
+            let end = rest.find('"')?;
+            if !rest[end + 1..].trim().is_empty() {
+                return None;
+            }
+            &rest[..end]
+        }
+        None => command,
+    };
+    if !exe.to_lowercase().ends_with(".exe") || !std::path::Path::new(exe).is_file() {
+        return None;
+    }
+    Some(exe.to_string())
+}
+
+/// Package AppUserModelID of a packaged process, which the taskbar uses when
+/// the window itself carries none (Snipping Tool's `XamlWindow`).
+pub unsafe fn process_app_user_model_id(
+    process: windows::Win32::Foundation::HANDLE,
+) -> Option<String> {
+    use windows::Win32::Storage::Packaging::Appx::GetApplicationUserModelId;
+    let mut buf = [0u16; 256];
+    let mut len = buf.len() as u32;
+    let status = GetApplicationUserModelId(
+        process,
+        &mut len,
+        Some(windows::core::PWSTR(buf.as_mut_ptr())),
+    );
+    if status.0 != 0 || len == 0 {
+        return None;
+    }
+    let text = String::from_utf16_lossy(&buf[..(len as usize).saturating_sub(1)]);
+    Some(text.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+fn get_window_string_property(hwnd: HWND, pid: u32) -> Option<String> {
     unsafe {
         use windows::Win32::Foundation::PROPERTYKEY;
         use windows::Win32::System::Com::StructuredStorage::{
@@ -949,21 +1002,27 @@ pub fn get_window_app_user_model_id(hwnd: HWND) -> Option<String> {
             IPropertyStore, SHGetPropertyStoreForWindow,
         };
 
-        const PKEY_APP_USER_MODEL_ID: PROPERTYKEY = PROPERTYKEY {
+        const PKEY_APP_USER_MODEL: PROPERTYKEY = PROPERTYKEY {
             fmtid: windows::core::GUID {
                 data1: 0x9F4C2855,
                 data2: 0x9F79,
                 data3: 0x4B39,
                 data4: [0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3],
             },
-            pid: 5,
+            pid: 0,
+        };
+        let key = PROPERTYKEY {
+            pid,
+            ..PKEY_APP_USER_MODEL
         };
 
         let store: IPropertyStore = SHGetPropertyStoreForWindow(hwnd).ok()?;
-        let mut prop = store.GetValue(&PKEY_APP_USER_MODEL_ID).ok()?;
-        let result = PropVariantToStringAlloc(&prop)
-            .ok()
-            .map(|pwstr| String::from_utf16_lossy(pwstr.as_wide()).trim().to_string());
+        let mut prop = store.GetValue(&key).ok()?;
+        let result = PropVariantToStringAlloc(&prop).ok().map(|pwstr| {
+            let value = String::from_utf16_lossy(pwstr.as_wide()).trim().to_string();
+            windows::Win32::System::Com::CoTaskMemFree(Some(pwstr.0 as _));
+            value
+        });
         let _ = PropVariantClear(&mut prop);
         result.filter(|s| !s.is_empty())
     }
@@ -1546,8 +1605,28 @@ pub fn capture_hwnd_to_base64(hwnd: HWND, max_width: u32, max_height: u32) -> Op
 mod tests {
     use super::{
         click_through_style, expand_env_vars, is_placed_rect, marker_contents, parse_marker_pid,
-        parse_marker_rect, parse_marker_secondaries, parse_marker_state,
+        parse_marker_rect, parse_marker_secondaries, parse_marker_state, relaunch_executable,
     };
+
+    #[test]
+    fn relaunch_identity_requires_an_existing_executable_without_arguments() {
+        let exe = std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(relaunch_executable(&exe), Some(exe.clone()));
+        assert_eq!(
+            relaunch_executable(&format!("\"{exe}\"")),
+            Some(exe.clone())
+        );
+        assert_eq!(
+            relaunch_executable(&format!("\"{exe}\" --profile-directory=Default")),
+            None
+        );
+        assert_eq!(relaunch_executable(&format!("{exe} --argument")), None);
+        assert_eq!(relaunch_executable("C:\\does\\not\\exist.exe"), None);
+        assert_eq!(relaunch_executable(""), None);
+    }
 
     #[test]
     fn click_through_keeps_the_window_layered() {

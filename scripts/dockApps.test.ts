@@ -1,5 +1,11 @@
-import { describe, expect, test } from "bun:test";
-import { mergeTrayApps, selectDockTrayApps, type AppInfo, type TrayApp } from "../src/dockApps";
+import { describe, expect, mock, test } from "bun:test";
+import {
+	createTrayLaunchFallback,
+	mergeTrayApps,
+	selectDockTrayApps,
+	type AppInfo,
+	type TrayApp
+} from "../src/dockApps";
 const tray: TrayApp = {
 	name: "Discord",
 	path: "C:\\Apps\\Discord.exe",
@@ -15,6 +21,30 @@ const windowApp: AppInfo = {
 	all_hwnds: [[11, "Discord"]]
 };
 describe("dock tray lifecycle", () => {
+	test("merges a helper-owned Steam window through its resolved executable identity", () => {
+		const steam = { ...tray, path: "C:\\Steam\\steam.exe", window_handles: [22] };
+		const helper = {
+			...windowApp,
+			path: "c:/steam/Steam.exe",
+			hwnd: 33,
+			all_hwnds: [[33, "Steam"]] as [number, string][]
+		};
+		const selected = selectDockTrayApps([helper], [steam], new Set(), () => false);
+		expect(selected.visible).toEqual([steam]);
+		expect(mergeTrayApps([helper], selected.visible)).toMatchObject([
+			{ path: helper.path, tray_ids: ["42"], is_background: false }
+		]);
+	});
+	test("does not attach a shared browser tray by executable path alone", () => {
+		const browserTray = { ...tray, path: "C:\\Browser\\brave.exe" };
+		const browserWindow = {
+			...windowApp,
+			path: browserTray.path,
+			hwnd: 99,
+			all_hwnds: [[99, "Browser"]] as [number, string][]
+		};
+		expect(mergeTrayApps([browserWindow], [browserTray])).toHaveLength(2);
+	});
 	test("does not show every tray app when the dock starts", () => {
 		const selected = selectDockTrayApps([], [tray], new Set(), () => false);
 		expect(selected.visible).toEqual([]);
@@ -78,5 +108,79 @@ describe("dock tray lifecycle", () => {
 	test("does not match a different process by display name", () => {
 		const other = { ...windowApp, hwnd: 99, all_hwnds: [[99, "Discord"]] as [number, string][] };
 		expect(mergeTrayApps([other], [tray])).toHaveLength(2);
+	});
+});
+
+describe("pinned tray launch fallback", () => {
+	const app: AppInfo = { ...windowApp, is_pinned: true, is_background: true };
+	test("coalesces repeated clicks and launches once if tray activation produced no window", async () => {
+		const launched = Promise.withResolvers<void>();
+		const launch = mock(async () => {
+			launched.resolve();
+		});
+		const fallback = createTrayLaunchFallback(
+			{ hasWindow: async () => false, launch, onError: () => {} },
+			0
+		);
+		for (let i = 0; i < 5; i++) fallback.schedule(app);
+		await launched.promise;
+		expect(launch).toHaveBeenCalledTimes(1);
+		fallback.dispose();
+	});
+	test("leaves apps that opened a window through their tray icon alone", async () => {
+		const checked = Promise.withResolvers<void>();
+		const launch = mock(async () => {});
+		const fallback = createTrayLaunchFallback(
+			{
+				hasWindow: async () => {
+					checked.resolve();
+					return true;
+				},
+				launch,
+				onError: () => {}
+			},
+			0
+		);
+		fallback.schedule(app);
+		await checked.promise;
+		await Promise.resolve();
+		expect(launch).not.toHaveBeenCalled();
+		fallback.dispose();
+	});
+	test("does not relaunch unpinned items and cancels scheduled work on teardown", async () => {
+		const hasWindow = mock(async () => false);
+		const fallback = createTrayLaunchFallback(
+			{ hasWindow, launch: async () => {}, onError: () => {} },
+			0
+		);
+		fallback.schedule({ ...app, is_pinned: false });
+		await Bun.sleep(10);
+		expect(hasWindow).not.toHaveBeenCalled();
+		fallback.schedule(app);
+		fallback.dispose();
+		await Bun.sleep(10);
+		expect(hasWindow).not.toHaveBeenCalled();
+	});
+	test("does not launch when the dock is disposed during a window check", async () => {
+		const started = Promise.withResolvers<void>();
+		const result = Promise.withResolvers<boolean>();
+		const launch = mock(async () => {});
+		const fallback = createTrayLaunchFallback(
+			{
+				hasWindow: () => {
+					started.resolve();
+					return result.promise;
+				},
+				launch,
+				onError: () => {}
+			},
+			0
+		);
+		fallback.schedule(app);
+		await started.promise;
+		fallback.dispose();
+		result.resolve(false);
+		await Promise.resolve();
+		expect(launch).not.toHaveBeenCalled();
 	});
 });

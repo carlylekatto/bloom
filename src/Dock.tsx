@@ -9,7 +9,13 @@ import { initTheme } from "./theme";
 import { useSettingsSync } from "./hooks/useSettingsSync";
 import { reloadIfMirrorWasStale } from "./hooks/settingsMirror";
 
-import { mergeTrayApps, selectDockTrayApps, type AppInfo, type TrayApp } from "./dockApps";
+import {
+	createTrayLaunchFallback,
+	mergeTrayApps,
+	selectDockTrayApps,
+	type AppInfo,
+	type TrayApp
+} from "./dockApps";
 import { driveLetter, hideDrive, removeCustomFolder, type DockExtra } from "./dockExtras";
 import { createRegionSender, measureElements, padRect, type RegionRect } from "./windowRegion";
 
@@ -219,6 +225,21 @@ const Dock = memo(function Dock() {
 	const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
 	const [activeOrder, setActiveOrder] = useState<string[]>([]);
 	const observedTrayPathsRef = useRef(new Set<string>());
+	const trayLaunchFallbackRef = useRef<ReturnType<typeof createTrayLaunchFallback> | null>(null);
+	useEffect(() => {
+		const fallback = createTrayLaunchFallback({
+			hasWindow: async (app) =>
+				(await invoke<AppInfo[]>("get_active_windows")).some((window) => isSameApp(app, window)),
+			launch: (app) => invoke("open_app", { appName: app.path }),
+			onError: (app, error) =>
+				console.error(`Failed to launch ${app.name} after its tray icon:`, error)
+		});
+		trayLaunchFallbackRef.current = fallback;
+		return () => {
+			fallback.dispose();
+			trayLaunchFallbackRef.current = null;
+		};
+	}, []);
 	const [isDragging, setIsDragging] = useState(false);
 	const [hoveredApp, setHoveredApp] = useState<string | null>(null);
 	const [pressedApp, setPressedApp] = useState<string | null>(null);
@@ -720,6 +741,7 @@ const Dock = memo(function Dock() {
 				await invoke("open_app", { appName: "start" });
 			} else if (app.is_background && app.tray_ids?.length === 1) {
 				await invoke("activate_tray_icon", { trayId: app.tray_ids[0] });
+				trayLaunchFallbackRef.current?.schedule(app);
 			} else if (app.all_hwnds && app.all_hwnds.length > 1) {
 				// Several windows: bring the most recent forward, then cycle.
 				await invoke("focus_app_windows", { hwnds: app.all_hwnds.map(([hwnd]) => hwnd) });
@@ -782,6 +804,19 @@ const Dock = memo(function Dock() {
 		closeMenu();
 		setPreviewData(null);
 		try {
+			// DOCK_RECT can still include the preview's padded hit area until
+			// the next render. Publish the actual bar before placing its menu.
+			const bar = dockRef.current?.getBoundingClientRect();
+			if (bar) {
+				await invoke("update_dock_rect", {
+					rect: {
+						x: Math.round(bar.x),
+						y: Math.round(bar.y),
+						width: Math.round(bar.width),
+						height: Math.round(bar.height)
+					}
+				});
+			}
 			await invoke("show_tray_context_menu", { trayId });
 		} catch (error) {
 			showActionError(error);

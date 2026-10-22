@@ -781,7 +781,16 @@ fn launch_path(path: &str) {
         }
 
         use std::path::Path;
-        let mut final_path = path.to_string();
+        // AppsFolder entries of classic programs can be saved as a path under a
+        // known-folder GUID (`{7C5A40EF-…}\Steam\Steam.exe`), which
+        // ShellExecute cannot open. Resolve it to the real file first.
+        let mut final_path = if path.starts_with('{') {
+            crate::tray::resolve_path(path)
+                .filter(|resolved| Path::new(resolved).exists())
+                .unwrap_or_else(|| path.to_string())
+        } else {
+            path.to_string()
+        };
 
         if !Path::new(&final_path).exists() {
             let file_name = Path::new(&final_path)

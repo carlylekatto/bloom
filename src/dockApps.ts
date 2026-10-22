@@ -18,12 +18,57 @@ export interface TrayApp {
 	window_handles: number[];
 }
 
+// Steam ignores a single tray activation. For a pinned background item only,
+// launch its saved target if no window appeared after the tray click. Coalesce
+// repeated clicks and cancel both timers and in-flight checks on dock teardown.
+export function createTrayLaunchFallback(
+	actions: {
+		hasWindow: (app: AppInfo) => Promise<boolean>;
+		launch: (app: AppInfo) => Promise<void>;
+		onError: (app: AppInfo, error: unknown) => void;
+	},
+	delayMs = 1500
+) {
+	const pending = new Map<string, ReturnType<typeof setTimeout>>();
+	let disposed = false;
+	return {
+		schedule(app: AppInfo) {
+			if (disposed || !app.is_pinned || !app.is_background) return;
+			const key = app.path.toLowerCase().replace(/\\/g, "/");
+			if (pending.has(key)) return;
+			const timer = setTimeout(async () => {
+				try {
+					const hasWindow = await actions.hasWindow(app);
+					if (!disposed && !hasWindow) await actions.launch(app);
+				} catch (error) {
+					if (!disposed) actions.onError(app, error);
+				} finally {
+					pending.delete(key);
+				}
+			}, delayMs);
+			pending.set(key, timer);
+		},
+		dispose() {
+			disposed = true;
+			for (const timer of pending.values()) clearTimeout(timer);
+			pending.clear();
+		}
+	};
+}
+
 const trayPath = (app: TrayApp) => app.path.toLowerCase().replace(/\\/g, "/");
+
+const isBrowserHostPath = (p: string) => /(msedge|chrome|brave|vivaldi|firefox)\.exe$/i.test(p);
 
 const ownsVisibleWindow = (window: AppInfo, tray: TrayApp) =>
 	(window.all_hwnds ?? (window.hwnd ? [[window.hwnd, window.name]] : [])).some(([hwnd]) =>
 		tray.window_handles.includes(hwnd as number)
-	);
+	) ||
+	// A window whose UI runs in a helper process (Steam's steamwebhelper.exe)
+	// is reported under the app's own exe; its tray icon belongs to that exe.
+	// Browser hosts are excluded: one exe hosts many unrelated web apps.
+	(!isBrowserHostPath(window.path) &&
+		window.path.toLowerCase().replace(/\\/g, "/") === trayPath(tray));
 
 // An unpinned notification icon becomes a dock item only after its app has
 // appeared with a window. Pinned apps are eligible immediately at startup.

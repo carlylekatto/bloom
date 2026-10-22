@@ -87,7 +87,11 @@ fn parse_guid(text: &str) -> Option<GUID> {
     GUID::try_from(text.trim_start_matches('{').trim_end_matches('}')).ok()
 }
 
-unsafe fn resolve_path(path: &str) -> Option<String> {
+/// Resolves a shell path that starts with a known-folder GUID
+/// (`{7C5A40EF-…}\Steam\steam.exe`) to a file-system path. The notification
+/// area settings and the AppsFolder parsing names of classic programs use
+/// this form; other paths are returned unchanged.
+pub(crate) unsafe fn resolve_path(path: &str) -> Option<String> {
     if !path.starts_with('{') {
         return Some(path.to_owned());
     }
@@ -112,6 +116,21 @@ fn is_explorer_hosted_icon(path: &str) -> bool {
     std::path::Path::new(path)
         .file_name()
         .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("explorer.exe"))
+}
+
+/// The overflow chevron ("Show hidden icons"). Its name is localized, so it is
+/// identified by AutomationId and class: the other system buttons sharing the
+/// `SystemTrayIcon` id (network, volume, clock) use different classes.
+fn is_overflow_chevron(automation_id: &str, class_name: &str) -> bool {
+    automation_id == "SystemTrayIcon" && class_name == "SystemTray.NormalButton"
+}
+
+/// Buttons in the taskbar's notification area that can belong to an app.
+/// Windows 11 26H2 exposes app icons as `NotifyItemIcon`; older builds used
+/// `SystemTrayIcon` for every button. The caller still requires exactly one
+/// button at the icon's own rectangle.
+fn is_tray_button_id(automation_id: &str) -> bool {
+    automation_id == "NotifyItemIcon" || automation_id == "SystemTrayIcon"
 }
 
 unsafe extern "system" fn collect_window(hwnd: HWND, param: LPARAM) -> windows::core::BOOL {
@@ -386,17 +405,23 @@ impl TrayExposure {
             .map_err(|e| e.to_string())?;
         // Only invoke the known overflow chevron. Win+B/Space can accidentally
         // activate another app when all notification icons are promoted.
+        // The chevron is identified by AutomationId and class: its name is
+        // localized ("Show Hidden Icons", "Ausgeblendete Symbole einblenden").
         for index in 0..elements.Length().unwrap_or(0) {
             let Ok(element) = elements.GetElement(index) else {
                 continue;
             };
-            if element
-                .CurrentAutomationId()
-                .is_ok_and(|s| s == "SystemTrayIcon")
-                && element
-                    .CurrentName()
-                    .is_ok_and(|s| s.to_string().starts_with("Show Hidden Icons"))
-            {
+            let is_chevron = is_overflow_chevron(
+                &element
+                    .CurrentAutomationId()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default(),
+                &element
+                    .CurrentClassName()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default(),
+            );
+            if is_chevron {
                 let pattern = element
                     .GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId)
                     .map_err(|e| e.to_string())?;
@@ -408,15 +433,20 @@ impl TrayExposure {
                     // its host; close that stale state before reopening it.
                     pattern.Invoke().map_err(|e| e.to_string())?;
                 }
-                pattern.Invoke().map_err(|e| e.to_string())?;
-                for _ in 0..20 {
-                    if let Ok(hwnd) = find_overflow() {
-                        self.overflow = Some(hwnd);
-                        if IsWindowVisible(hwnd).as_bool() && has_icons(hwnd) {
-                            return Ok(());
+                // The open/closed state is only visible in the English name, so
+                // on other languages a stale "open" state is detected by the
+                // overflow not appearing: toggle once more and wait again.
+                for _attempt in 0..2 {
+                    pattern.Invoke().map_err(|e| e.to_string())?;
+                    for _ in 0..20 {
+                        if let Ok(hwnd) = find_overflow() {
+                            self.overflow = Some(hwnd);
+                            if IsWindowVisible(hwnd).as_bool() && has_icons(hwnd) {
+                                return Ok(());
+                            }
                         }
+                        std::thread::sleep(std::time::Duration::from_millis(30));
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(30));
                 }
                 break;
             }
@@ -623,17 +653,14 @@ unsafe fn find_promoted_icon(
     let dpi = GetDpiForWindow(taskbar).max(96) as f64;
     let center_x = (icon.left + icon.right) as f64 / 2.0;
     let center_y = (icon.top + icon.bottom) as f64 / 2.0;
-    let mut matches = Vec::new();
+    // UIA can list only an app button's child image instead of the button
+    // itself, so a hit is walked up to the tray button that owns it.
+    let walker = automation.RawViewWalker().map_err(|e| e.to_string())?;
+    let mut matches: Vec<IUIAutomationElement> = Vec::new();
     for index in 0..elements.Length().unwrap_or(0) {
         let Ok(element) = elements.GetElement(index) else {
             continue;
         };
-        if !element
-            .CurrentAutomationId()
-            .is_ok_and(|id| id == "SystemTrayIcon")
-        {
-            continue;
-        }
         let Ok(bounds) = element.CurrentBoundingRectangle() else {
             continue;
         };
@@ -646,8 +673,19 @@ unsafe fn find_promoted_icon(
                 && y >= bounds.top as f64
                 && y < bounds.bottom as f64
         };
-        if hit(center_x, center_y) || hit(center_x * 96.0 / dpi, center_y * 96.0 / dpi) {
-            matches.push(element);
+        if !(hit(center_x, center_y) || hit(center_x * 96.0 / dpi, center_y * 96.0 / dpi)) {
+            continue;
+        }
+        let Some(button) = owning_tray_button(&walker, element) else {
+            continue;
+        };
+        let duplicate = matches.iter().any(|known| {
+            automation
+                .CompareElements(known, &button)
+                .is_ok_and(|same| same.as_bool())
+        });
+        if !duplicate {
+            matches.push(button);
         }
     }
     // The icon's position already identifies exactly one button, so it's
@@ -656,6 +694,25 @@ unsafe fn find_promoted_icon(
         return Err("Windows could not identify this app's tray icon.".into());
     }
     matches.remove(0).cast().map_err(|e| e.to_string())
+}
+
+/// The notification-area button an element belongs to: the element itself or
+/// one of its two nearest ancestors.
+unsafe fn owning_tray_button(
+    walker: &IUIAutomationTreeWalker,
+    element: IUIAutomationElement,
+) -> Option<IUIAutomationElement> {
+    let mut current = element;
+    for _ in 0..3 {
+        if current
+            .CurrentAutomationId()
+            .is_ok_and(|id| is_tray_button_id(&id.to_string()))
+        {
+            return Some(current);
+        }
+        current = walker.GetParentElement(&current).ok()?;
+    }
+    None
 }
 
 /// Visible top-level windows.
@@ -672,13 +729,53 @@ unsafe fn visible_windows() -> Vec<HWND> {
     windows
 }
 
+// Restrict custom popups to the measured Steam menu shape, so an ordinary
+// app window appearing at the same time is never mistaken for a tray menu.
+fn is_tray_menu_window(class: &str, title: &str) -> bool {
+    class == "#32768" || (class == "SDL_app" && title == "Menu")
+}
+
+fn is_same_app_family(process_path: &str, app_path: &str) -> bool {
+    if process_path.eq_ignore_ascii_case(app_path) {
+        return true;
+    }
+    let Some(directory) = std::path::Path::new(app_path).parent() else {
+        return false;
+    };
+    let directory = format!("{}\\", directory.to_string_lossy().to_lowercase());
+    let system_root = format!(
+        "{}\\",
+        std::env::var("SystemRoot")
+            .unwrap_or_else(|_| "C:\\Windows".into())
+            .to_lowercase()
+    );
+    // Shared install roots must not claim menus from unrelated applications.
+    let is_shared_root = ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"]
+        .iter()
+        .filter_map(|key| std::env::var(key).ok())
+        .any(|root| directory == format!("{}\\", root.to_lowercase()));
+    directory.len() > 3
+        && !is_shared_root
+        && !directory.starts_with(&system_root)
+        && process_path.to_lowercase().starts_with(&directory)
+}
+
+fn dock_bar_top() -> Option<i32> {
+    use tauri::Manager;
+    let app = crate::state::DISPLAY_MONITOR_HANDLE.get()?;
+    let scale = app.get_webview_window("dock")?.scale_factor().ok()?;
+    let (position, _) = (*crate::state::DOCK_WINDOW_RECT.lock().ok()?)?;
+    let bar = (*crate::state::DOCK_RECT.lock().ok()?)?;
+    Some(position.y + (bar.y as f64 * scale) as i32)
+}
+
 /// Apps open their tray menu at their notification icon, which stays in the
 /// hidden taskbar's corner while Bloom replaces the taskbar. Waits briefly for
 /// the menu the app opens and moves it to `anchor` (the dock icon that was
 /// clicked), above the pointer and kept on that monitor. The menu is found by
 /// its process's executable: many icons are identified by GUID and carry no
 /// window to take the process from.
-unsafe fn move_new_menu_to(app_path: &str, before: &[HWND], anchor: POINT) -> Option<HWND> {
+unsafe fn move_new_menu_to(app_path: &str, before: &[HWND], anchor: POINT) -> Option<(HWND, i32)> {
     use windows::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
@@ -692,19 +789,25 @@ unsafe fn move_new_menu_to(app_path: &str, before: &[HWND], anchor: POINT) -> Op
             let mut class_name = [0u8; 256];
             let len =
                 windows::Win32::UI::WindowsAndMessaging::GetClassNameA(*hwnd, &mut class_name);
-            if &class_name[..len as usize] != b"#32768" {
+            let class = std::str::from_utf8(&class_name[..len as usize]).unwrap_or("");
+            let mut title = [0u16; 64];
+            let title_len = GetWindowTextW(*hwnd, &mut title);
+            if !is_tray_menu_window(
+                class,
+                &String::from_utf16_lossy(&title[..title_len as usize]),
+            ) {
                 return false;
             }
             let mut pid = 0u32;
             GetWindowThreadProcessId(*hwnd, Some(&mut pid));
             crate::commands::process_image_path(pid)
-                .is_some_and(|path| path.eq_ignore_ascii_case(app_path))
+                .is_some_and(|path| is_same_app_family(&path, app_path))
         }) else {
             continue;
         };
         let mut rect = RECT::default();
         if GetWindowRect(menu, &mut rect).is_err() {
-            return Some(menu);
+            return None;
         }
         let (width, height) = (rect.right - rect.left, rect.bottom - rect.top);
         let mut info = MONITORINFO {
@@ -713,13 +816,14 @@ unsafe fn move_new_menu_to(app_path: &str, before: &[HWND], anchor: POINT) -> Op
         };
         let monitor = MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST);
         if !GetMonitorInfoW(monitor, &mut info).as_bool() {
-            return Some(menu);
+            return None;
         }
         let area = info.rcMonitor;
         let x = anchor
             .x
             .clamp(area.left, (area.right - width).max(area.left));
-        let y = (anchor.y - height).clamp(area.top, (area.bottom - height).max(area.top));
+        let bottom = dock_bar_top().map_or(anchor.y, |top| top.min(anchor.y));
+        let y = (bottom - height).clamp(area.top, (area.bottom - height).max(area.top));
         let _ = SetWindowPos(
             menu,
             None,
@@ -729,19 +833,33 @@ unsafe fn move_new_menu_to(app_path: &str, before: &[HWND], anchor: POINT) -> Op
             0,
             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
         );
-        return Some(menu);
+        return Some((menu, y + height));
     }
     None
 }
 
 /// Keep the dock's native-menu hold until the external popup closes. UIA's
 /// ShowContextMenu returns when the popup opens, not when the user dismisses it.
-unsafe fn wait_for_menu_close(menu: HWND) {
+unsafe fn wait_for_menu_close(menu: HWND, bottom: i32) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     while std::time::Instant::now() < deadline
         && IsWindow(Some(menu)).as_bool()
         && IsWindowVisible(menu).as_bool()
     {
+        // Steam can reposition its popup after UIA returns. Keep its bottom
+        // above the bar while retaining the existing native-menu hover hold.
+        let mut rect = RECT::default();
+        if GetWindowRect(menu, &mut rect).is_ok() && rect.bottom > bottom {
+            let _ = SetWindowPos(
+                menu,
+                None,
+                rect.left,
+                bottom - (rect.bottom - rect.top),
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
@@ -781,8 +899,8 @@ pub fn interact(key: &str, context_menu: bool) -> Result<(), String> {
                 .map_err(|_| "Windows could not open this app's native tray menu.".to_string())?;
             let menu = move_new_menu_to(&icon.path, &before, cursor);
             drop(exposure);
-            if let Some(menu) = menu {
-                wait_for_menu_close(menu);
+            if let Some((menu, bottom)) = menu {
+                wait_for_menu_close(menu, bottom);
             }
             Ok(())
         } else {
@@ -800,6 +918,82 @@ pub fn interact(key: &str, context_menu: bool) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn custom_tray_menu_detection_excludes_normal_client_windows() {
+        assert!(is_tray_menu_window("#32768", ""));
+        assert!(is_tray_menu_window("SDL_app", "Menu"));
+        assert!(!is_tray_menu_window("SDL_app", "Steam"));
+        assert!(!is_tray_menu_window("OtherApp", "Menu"));
+    }
+
+    #[test]
+    fn known_folder_paths_expand_and_keep_the_relative_executable() {
+        unsafe {
+            let resolved =
+                resolve_path("{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\Steam\\Steam.exe").unwrap();
+            let root = std::env::var("ProgramFiles(x86)").unwrap();
+            assert_eq!(
+                resolved.to_lowercase(),
+                format!("{root}\\Steam\\Steam.exe").to_lowercase()
+            );
+            assert_eq!(
+                resolve_path("C:\\Apps\\Steam.exe").as_deref(),
+                Some("C:\\Apps\\Steam.exe")
+            );
+            assert!(resolve_path("{not-a-guid}\\app.exe").is_none());
+        }
+    }
+    #[test]
+    fn chevron_is_identified_without_its_localized_name() {
+        assert!(is_overflow_chevron(
+            "SystemTrayIcon",
+            "SystemTray.NormalButton"
+        ));
+        assert!(!is_overflow_chevron(
+            "NotifyItemIcon",
+            "SystemTray.NormalButton"
+        ));
+        assert!(!is_overflow_chevron(
+            "SystemTrayIcon",
+            "SystemTray.OmniButton"
+        ));
+        assert!(!is_overflow_chevron(
+            "SystemTrayIcon",
+            "SystemTray.AccentButton"
+        ));
+    }
+
+    #[test]
+    fn tray_menus_of_helper_processes_belong_to_their_app() {
+        let steam = "C:\\Program Files (x86)\\Steam\\steam.exe";
+        assert!(is_same_app_family(steam, steam));
+        assert!(is_same_app_family(
+            "C:\\Program Files (x86)\\Steam\\bin\\cef\\cef.win64\\steamwebhelper.exe",
+            steam
+        ));
+        assert!(!is_same_app_family(
+            "C:\\Program Files\\Apps\\GHelper.exe",
+            steam
+        ));
+        assert!(!is_same_app_family(
+            "C:\\Program Files (x86)\\SteamTools\\helper.exe",
+            steam
+        ));
+        // Apps in the Windows folder must not claim every system process.
+        assert!(!is_same_app_family(
+            "C:\\Windows\\System32\\notepad.exe",
+            "C:\\Windows\\System32\\SecurityHealthSystray.exe"
+        ));
+    }
+
+    #[test]
+    fn promoted_app_icons_use_notify_item_icon_on_26h2() {
+        assert!(is_tray_button_id("NotifyItemIcon"));
+        assert!(is_tray_button_id("SystemTrayIcon"));
+        assert!(!is_tray_button_id(""));
+        assert!(!is_tray_button_id("TaskbarFrame"));
+    }
+
     #[test]
     #[ignore = "read-only check against the current Windows desktop"]
     fn live_tray_discovery() {
