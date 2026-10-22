@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
 	dockIconKey,
+	isSameWebApp,
 	matchesPackagedExecutable,
 	mergeTrayApps,
+	pinnableApp,
 	selectDockTrayApps,
 	type AppInfo,
 	type TrayApp
@@ -174,5 +176,37 @@ describe("packaged executable identity", () => {
 			{ path: pin.path, tray_ids: icon.tray_ids }
 		]);
 		expect(mergeTrayApps([window], [icon])).toHaveLength(1);
+	});
+});
+
+describe("web apps", () => {
+	const app = (name: string, path: string): AppInfo => ({ name, path, icon: null, is_running: false });
+	const chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe";
+	const installed = [
+		app("Google Chrome", "Chrome"),
+		app("Netflix", "Chrome._crx_eppojlglocmnohnlnionkobfln"),
+		app("Spotify", "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify")
+	];
+
+	test("pins a running web app as the web app, not its browser", () => {
+		const window = { ...app("Netflix", chrome), is_running: true, executable: "chrome.exe", hwnd: 7 };
+		expect(pinnableApp(window, installed).path).toBe("Chrome._crx_eppojlglocmnohnlnionkobfln");
+		// The browser's own window, and a web app that isn't installed, pin as they are.
+		expect(pinnableApp(app("Google Chrome", chrome), installed).path).toBe(chrome);
+		expect(pinnableApp(app("YouTube", chrome), installed).path).toBe(chrome);
+		// Other apps are untouched.
+		const spotify = app("Spotify", "C:\Spotify\Spotify.exe");
+		expect(pinnableApp(spotify, installed)).toBe(spotify);
+	});
+
+	test("matches a pinned web app with its running window by name", () => {
+		const pin = app("Netflix", "Chrome._crx_eppojlglocmnohnlnionkobfln");
+		expect(isSameWebApp(pin, app("Netflix", chrome))).toBe(true);
+		expect(isSameWebApp(app("Netflix", chrome), pin)).toBe(true);
+		// Another web app's window, or the browser itself, isn't it.
+		expect(isSameWebApp(pin, app("YouTube", chrome))).toBe(false);
+		expect(isSameWebApp(pin, app("Google Chrome", chrome))).toBe(false);
+		// Two plain apps aren't web apps at all.
+		expect(isSameWebApp(app("Spotify", "C:\Spotify\Spotify.exe"), app("Spotify", "C:\Spotify\Spotify.exe"))).toBe(false);
 	});
 });
