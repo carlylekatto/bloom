@@ -2040,11 +2040,24 @@ pub async fn load_pinned_apps(app: AppHandle) -> Vec<AppInfo> {
         .app_config_dir()
         .unwrap_or_default()
         .join("pinned_apps.json");
-    if let Ok(content) = std::fs::read_to_string(path) {
+    if let Ok(content) = std::fs::read_to_string(&path) {
         if let Ok(apps) = serde_json::from_str::<Vec<AppInfo>>(&content) {
-            return tauri::async_runtime::spawn_blocking(move || refresh_pinned_names(apps))
-                .await
-                .unwrap_or_default();
+            return tauri::async_runtime::spawn_blocking(move || {
+                let before: Vec<String> = apps.iter().map(|a| a.path.clone()).collect();
+                let apps = refresh_pinned_names(apps);
+                // A repaired pin (a web app saved as its browser) is saved
+                // right away; the dock only saves its pins when they change.
+                if apps.iter().map(|a| &a.path).ne(before.iter()) {
+                    if let (Ok(_guard), Ok(json)) =
+                        (PINNED_FILE_LOCK.lock(), serde_json::to_string(&apps))
+                    {
+                        let _ = crate::utils::atomic_write_file(&path, json.as_bytes());
+                    }
+                }
+                apps
+            })
+            .await
+            .unwrap_or_default();
         }
     }
     vec![
