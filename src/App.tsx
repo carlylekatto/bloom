@@ -62,7 +62,8 @@ import {
 	ChevronLeft,
 	ChevronRight,
 	Inbox,
-	Music
+	Music,
+	Zap
 } from "lucide-react";
 
 /**
@@ -462,6 +463,18 @@ type BloomMode =
 	| "device";
 
 // A device that just connected or disconnected, shown briefly in the pill.
+interface BudLevel {
+	level: number;
+	charging: boolean;
+}
+
+/** Each bud's and the case's battery, from the backend's `bluetooth-buds`. */
+interface BudsBattery {
+	left: BudLevel | null;
+	right: BudLevel | null;
+	case: BudLevel | null;
+}
+
 interface DeviceAlert {
 	// The device's id, so a later battery report can find its alert.
 	id: string;
@@ -469,6 +482,8 @@ interface DeviceAlert {
 	name: string;
 	connected: boolean;
 	battery: number | null;
+	// Each bud's and the case's battery, for earbuds that report them.
+	buds?: BudsBattery | null;
 	// A USB device, which has no list to open when the alert is clicked.
 	usb?: boolean;
 	// Changes on every alert, so the drawing replays its animation.
@@ -516,12 +531,15 @@ const DEVICE_ALERT_MS = { connected: 4200, disconnected: 2600 };
 const DEVICE_ALERT_QUEUE = 3;
 
 /** A small ring showing a device's battery, with the level in the middle. */
-function DeviceBatteryRing({ level }: { level: number }) {
+function DeviceBatteryRing({ level, charging = false }: { level: number; charging?: boolean }) {
 	const r = 10.5;
 	const circumference = 2 * Math.PI * r;
-	const low = level <= 20;
+	const low = level <= 20 && !charging;
 	return (
-		<div className={`device-alert-battery${low ? " low" : ""}`} title={`${level}%`}>
+		<div
+			className={`device-alert-battery${low ? " low" : ""}${charging ? " charging" : ""}`}
+			title={`${level}%${charging ? ", charging" : ""}`}
+		>
 			<svg viewBox="0 0 28 28" width="28" height="28">
 				<circle cx="14" cy="14" r={r} className="track" />
 				<circle
@@ -534,6 +552,28 @@ function DeviceBatteryRing({ level }: { level: number }) {
 				/>
 			</svg>
 			<span>{level}</span>
+		</div>
+	);
+}
+
+// Each bud's and the case's battery, for earbuds that report them: a ring
+// per part with its label underneath. Parts with no reading are left out.
+function DeviceBudsBattery({ buds }: { buds: BudsBattery }) {
+	const parts: [string, BudLevel][] = [];
+	if (buds.left) parts.push(["L", buds.left]);
+	if (buds.right) parts.push(["R", buds.right]);
+	if (buds.case) parts.push(["Case", buds.case]);
+	return (
+		<div className="device-alert-buds">
+			{parts.map(([label, part]) => (
+				<div key={label} className="device-alert-bud">
+					<DeviceBatteryRing level={part.level} charging={part.charging} />
+					<span className="device-alert-bud-label">
+						{label}
+						{part.charging && <Zap className="device-alert-bud-charging" />}
+					</span>
+				</div>
+			))}
 		</div>
 	);
 }
@@ -2249,6 +2289,12 @@ function App() {
 				alert && alert.id === payload.id && alert.connected ? { ...alert, battery: payload.battery } : alert
 			);
 		});
+		// Earbuds that report each bud's and the case's level send them a
+		// moment after connecting.
+		const unlistenBuds = listen<BudsBattery & { id: string }>("bluetooth-buds", ({ payload }) => {
+			const { id, ...buds } = payload;
+			setDeviceAlert((alert) => (alert && alert.id === id && alert.connected ? { ...alert, buds } : alert));
+		});
 		const unlistenUsb = listen<UsbConnection>("usb-connection", ({ payload }) => {
 			showDeviceAlert({
 				id: payload.id,
@@ -2263,6 +2309,7 @@ function App() {
 			unlistenConnection.then((f) => f());
 			unlistenBattery.then((f) => f());
 			unlistenUsb.then((f) => f());
+			unlistenBuds.then((f) => f());
 		};
 	}, [windowLabel, showDeviceAlert]);
 
@@ -2285,6 +2332,20 @@ function App() {
 				battery: null,
 				usb: true
 			});
+		// __bloomDeviceBuds("dev", [90, false], [80, true], [40, false]) stands
+		// in for bluetooth-buds; pass null for a part with no reading.
+		const part = (p: [number, boolean] | null) => (p ? { level: p[0], charging: p[1] } : null);
+		w.__bloomDeviceBuds = (
+			id: string,
+			left: [number, boolean] | null,
+			right: [number, boolean] | null,
+			caseLevel: [number, boolean] | null
+		) =>
+			setDeviceAlert((alert) =>
+				alert && alert.id === id && alert.connected
+					? { ...alert, buds: { left: part(left), right: part(right), case: part(caseLevel) } }
+					: alert
+			);
 		w.__bloomDeviceBattery = (id: string, battery: number) =>
 			setDeviceAlert((alert) => (alert && alert.id === id && alert.connected ? { ...alert, battery } : alert));
 	}, [showDeviceAlert]);
@@ -4289,8 +4350,11 @@ function App() {
 													{deviceAlertStatus(deviceAlert.art, deviceAlert.connected)}
 												</span>
 											</div>
-											{deviceAlert.connected && deviceAlert.battery !== null && (
-												<DeviceBatteryRing level={deviceAlert.battery} />
+											{deviceAlert.connected && deviceAlert.buds ? (
+												<DeviceBudsBattery buds={deviceAlert.buds} />
+											) : (
+												deviceAlert.connected &&
+												deviceAlert.battery !== null && <DeviceBatteryRing level={deviceAlert.battery} />
 											)}
 										</motion.div>
 									)}

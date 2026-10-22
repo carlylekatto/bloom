@@ -2,6 +2,7 @@
 
 mod battery;
 mod bluetooth;
+mod buds;
 mod commands;
 mod ddc_ci;
 mod diagnostics;

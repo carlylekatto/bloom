@@ -1761,6 +1761,37 @@ img {
 	font-weight: 600;
 }
 
+/* Earbuds: a ring for each bud and the case, labelled underneath */
+.device-alert-buds {
+	flex: none;
+	display: flex;
+	gap: 7px;
+}
+
+.device-alert-bud {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 2px;
+}
+
+.device-alert-bud-label {
+	display: inline-flex;
+	align-items: center;
+	gap: 1px;
+	font-size: 9px;
+	font-weight: 600;
+	color: var(--bloom-text-muted, rgba(255, 255, 255, 0.55));
+}
+
+.device-alert-bud-charging {
+	width: 9px;
+	height: 9px;
+	color: #32d74b;
+	fill: currentColor;
+	stroke-width: 0;
+}
+
 /* Announcement card */
 .announcement-content {
 	position: absolute;

@@ -520,6 +520,55 @@ fn follow_up_battery(id: String, name: String) {
     });
 }
 
+#[derive(Clone, Serialize)]
+pub struct BtBudsEvent {
+    pub id: String,
+    #[serde(flatten)]
+    pub battery: crate::buds::BudsBattery,
+}
+
+/// Reads each bud's and the case's battery for an audio device that just
+/// connected, if it's earbuds that report them, and sends it as
+/// `bluetooth-buds`.
+fn follow_up_buds(id: String, name: String) {
+    std::thread::spawn(move || {
+        com_init();
+        let Some(container) = CONTAINERS
+            .lock()
+            .ok()
+            .and_then(|cache| cache.as_ref()?.get(&id).copied())
+        else {
+            return;
+        };
+        let aqs = HSTRING::from(format!("System.Devices.ContainerId:=\"{{{container:?}}}\""));
+        let apple_model = find_all(&aqs, &[], DeviceInformationKind::Device)
+            .iter()
+            .filter_map(|info| info.Id().ok())
+            .filter_map(|id| crate::buds::vendor_product(&id.to_string()))
+            .find(|(vendor, _)| *vendor == crate::buds::APPLE_VENDOR)
+            .map(|(_, product)| product);
+        let battery = match apple_model {
+            Some(model) => crate::buds::read_apple(model, Duration::from_secs(6)),
+            None => {
+                // RFCOMM runs over the classic link.
+                let classic = CONTAINERS.lock().ok().and_then(|cache| {
+                    cache
+                        .as_ref()?
+                        .iter()
+                        .find(|(id, c)| **c == container && id.starts_with("Bluetooth#"))
+                        .map(|(id, _)| id.clone())
+                });
+                classic.and_then(|classic| {
+                    crate::buds::read_rfcomm_battery(&classic, &name, Duration::from_secs(4))
+                })
+            }
+        };
+        if let Some(battery) = battery.filter(crate::buds::BudsBattery::is_split) {
+            emit("bluetooth-buds", BtBudsEvent { id, battery });
+        }
+    });
+}
+
 fn notify_paired_change(tx: &Sender<()>) {
     emit("bluetooth-changed", ());
     let _ = tx.send(());
@@ -586,10 +635,14 @@ pub fn setup_bluetooth_notifications(app: AppHandle) {
                 if started.elapsed() >= Duration::from_secs(5) {
                     for change in connection_changes(&previous, &current) {
                         let needs_battery = change.connected && change.battery.is_none();
+                        let earbuds = change.connected && change.kind == "audio";
                         let (id, name) = (change.id.clone(), change.name.clone());
                         emit("bluetooth-connection", change);
                         if needs_battery {
-                            follow_up_battery(id, name);
+                            follow_up_battery(id.clone(), name.clone());
+                        }
+                        if earbuds {
+                            follow_up_buds(id, name);
                         }
                     }
                 }
