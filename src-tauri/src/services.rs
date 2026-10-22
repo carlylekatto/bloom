@@ -4558,8 +4558,16 @@ pub unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> B
                             .as_deref()
                             .map_or(false, crate::commands::is_browser_pwa_aumid);
 
-                    let final_name = if ((is_browser_host
-                        && (is_browser_pwa || window_aumid.is_none()))
+                    // A web app's own name, as it's registered in Start: its
+                    // title changes with what it shows ("Inbox (12) - Gmail").
+                    let web_app_name = window_aumid
+                        .as_deref()
+                        .filter(|_| is_browser_pwa)
+                        .and_then(crate::commands::shell_app_name);
+
+                    let final_name = if let Some(name) = web_app_name {
+                        name
+                    } else if ((is_browser_host && (is_browser_pwa || window_aumid.is_none()))
                         || name == "ApplicationFrameHost"
                         || name == "SystemSettings")
                         && !title.is_empty()
@@ -4583,15 +4591,17 @@ pub unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> B
                     let already_exists = apps.iter().any(|a| a.hwnd == Some(hwnd.0 as isize));
 
                     if !already_exists && !is_uwp_core_window {
-                        // Packaged apps (Store/UWP/PWAs) expose their package identity on the
-                        // window. Using it as the path makes pinned shell-app entries match
-                        // their running windows and gives the icon code an exact AUMID.
+                        // Packaged apps (Store/UWP/PWAs) and browser-installed web
+                        // apps (Chrome._crx_<id>) expose their identity on the window.
+                        // Using it as the path makes pinned shell-app entries match
+                        // their running windows, gives the icon code an exact AUMID,
+                        // and keeps a web app apart from its browser and other web apps.
                         let path = if is_uwp_frame
                             || lowercase_path.contains("\\windowsapps\\")
                             || is_browser_host
                         {
                             match window_aumid {
-                                Some(aumid) if aumid.contains('!') => aumid,
+                                Some(aumid) if aumid.contains('!') || is_browser_pwa => aumid,
                                 _ => path,
                             }
                         } else {

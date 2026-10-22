@@ -843,9 +843,14 @@ const Dock = memo(function Dock() {
 			// Fuzzy guard: the same app pinned via another entry shape (running
 			// window vs installed shortcut) must never create a duplicate.
 			if (pinnedApps.some((a) => isSameApp(a, app))) return;
-			// A running web app is its browser's process; pin the web app itself.
+			// A web app's window carries the web app's id as its path. One that
+			// doesn't (an unusual browser) is its browser's process: pin the
+			// installed web app with its name instead.
 			const installed = await invoke<AppInfo[]>("get_installed_apps").catch(() => []);
 			const pin = pinnableApp(app, installed);
+			// Not in the list yet (installed a moment ago): scan again, and the
+			// pin is repaired when the new list arrives.
+			if (pin === app && isBrowserHost(app.path)) invoke("refresh_installed_apps").catch(() => {});
 			newPinned = [...pinnedApps, { ...pin, is_pinned: true, is_running: false, hwnd: undefined }];
 			fetchIcon(pin.path, pin.name);
 		}
@@ -2489,6 +2494,13 @@ function AddAppPopup({
 			}
 		};
 		load();
+		// Apps installed since the list was made (a web app just installed from
+		// the browser) appear once a fresh scan finishes.
+		invoke("refresh_installed_apps").catch(() => {});
+		const unlisten = listen("installed-apps-updated", () => void load());
+		return () => {
+			unlisten.then((f) => f());
+		};
 	}, []);
 
 	useEffect(() => {

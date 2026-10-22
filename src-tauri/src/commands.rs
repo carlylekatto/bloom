@@ -1255,6 +1255,49 @@ fn is_browser_host_process(path: &str) -> bool {
         || p.contains("firefox.exe")
 }
 
+/// Names already read for shell application ids.
+static SHELL_APP_NAMES: std::sync::Mutex<Option<HashMap<String, String>>> =
+    std::sync::Mutex::new(None);
+
+/// The name a shell application id is registered under in Start ("Gmail"
+/// for `Chrome._crx_<id>`). A web app's window title changes with what it
+/// shows ("Inbox (12) - you@gmail.com - Gmail"), so this is its stable name.
+/// Cached, as it's read for every web app window on each window scan.
+pub(crate) fn shell_app_name(aumid: &str) -> Option<String> {
+    if let Some(name) = SHELL_APP_NAMES
+        .lock()
+        .ok()
+        .and_then(|names| names.as_ref()?.get(aumid).cloned())
+    {
+        return Some(name);
+    }
+    let name = unsafe {
+        use windows::Win32::UI::Shell::{
+            IShellItem, SHCreateItemFromParsingName, SIGDN_NORMALDISPLAY,
+        };
+        let parsing_name: Vec<u16> = format!("shell:AppsFolder\\{aumid}")
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let item: IShellItem =
+            SHCreateItemFromParsingName(windows::core::PCWSTR(parsing_name.as_ptr()), None).ok()?;
+        let text = item.GetDisplayName(SIGDN_NORMALDISPLAY).ok()?;
+        let name = text.to_string().ok();
+        windows::Win32::System::Com::CoTaskMemFree(Some(text.0 as *const _));
+        name?
+    };
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+    if let Ok(mut names) = SHELL_APP_NAMES.lock() {
+        names
+            .get_or_insert_with(HashMap::new)
+            .insert(aumid.to_string(), name.clone());
+    }
+    Some(name)
+}
+
 /// Resolves the icon of a shell application id (Store/UWP/packaged PWA) through
 /// `shell:AppsFolder`. `SHGetFileInfoW` cannot handle these; `IShellItemImageFactory` can.
 fn icon_from_aumid(aumid: &str) -> Option<String> {
@@ -2259,6 +2302,23 @@ pub async fn get_custom_icons(app: AppHandle) -> Result<HashMap<String, String>,
     Ok(result)
 }
 
+/// Scans the installed apps again, so ones installed since startup (a web app
+/// installed from the browser a moment ago) show up; `installed-apps-updated`
+/// follows. At most once every 10 seconds.
+#[tauri::command]
+pub fn refresh_installed_apps() {
+    static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    if let Ok(mut last) = LAST.lock() {
+        if last.is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(10)) {
+            return;
+        }
+        *last = Some(std::time::Instant::now());
+    }
+    crate::services::trigger_app_scan();
+}
+
+/// The installed apps, from the scan made at startup (or the latest
+/// refresh). See `refresh_installed_apps` for picking up apps installed since.
 #[tauri::command]
 pub async fn get_installed_apps() -> Vec<AppInfo> {
     let cache = INSTALLED_APPS_CACHE.get_or_init(|| std::sync::Mutex::new(Vec::new()));
