@@ -6,15 +6,20 @@
 //! "Microphone" input) between unplugged and active. Windows reports those
 //! state changes to an endpoint notification client; on each one the jack's
 //! state is read again and a change is sent as `wired-audio-connection`.
-//! Outputs of Bluetooth and USB devices are in those devices' own containers
-//! and are left to their own watchers.
+//!
+//! Windows files what's plugged into a jack under a device container of its
+//! own, holding nothing but the jack's endpoints. Outputs of Bluetooth and
+//! USB devices are in containers that also hold the device's hardware; those
+//! are left to their own watchers.
 
 use serde::Serialize;
+use std::collections::HashMap;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
-use windows::core::{implement, Interface, GUID, PCWSTR};
+use windows::core::{implement, Interface, GUID, HSTRING, PCWSTR};
+use windows::Devices::Enumeration::{DeviceInformation, DeviceInformationKind};
 use windows::Win32::Devices::FunctionDiscovery::{
     PKEY_DeviceInterface_FriendlyName, PKEY_Device_ContainerId, PKEY_Device_DeviceDesc,
 };
@@ -30,6 +35,7 @@ use windows::Win32::System::Com::StructuredStorage::{
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CLSCTX_ALL, COINIT_MULTITHREADED, STGM_READ,
 };
+use windows_collections::IIterable;
 
 /// The container Windows puts the computer's own devices in.
 const MACHINE_CONTAINER: GUID = GUID::from_u128(0x00000000_0000_0000_ffff_ffffffffffff);
@@ -123,8 +129,60 @@ fn string_prop(device: &IMMDevice, key: &PROPERTYKEY) -> Option<String> {
     }
 }
 
-/// The computer's own active audio endpoints. Bluetooth and USB outputs are
-/// in their devices' containers, so they're left out.
+/// Whether the devices in an endpoint's container are only audio endpoints
+/// (`SWD\MMDEVAPI\...`): what's plugged into a jack has no hardware of its
+/// own. A Bluetooth or USB device's container holds its hardware too.
+pub fn is_plug_container(device_ids: &[String]) -> bool {
+    device_ids
+        .iter()
+        .all(|id| id.to_ascii_uppercase().starts_with("SWD\\MMDEVAPI\\"))
+}
+
+/// Containers already checked, by id: whether they're the jack's.
+static JACK_CONTAINERS: Mutex<Option<HashMap<String, bool>>> = Mutex::new(None);
+
+/// Whether an endpoint in this container is the computer's own: in its
+/// container, or (for what's plugged into a jack, which Windows treats as a
+/// device of its own) in a container with no hardware.
+fn is_jack_container(container: &GUID) -> bool {
+    if *container == MACHINE_CONTAINER {
+        return true;
+    }
+    let key = format!("{container:?}");
+    if let Some(known) = JACK_CONTAINERS
+        .lock()
+        .ok()
+        .and_then(|c| c.as_ref()?.get(&key).copied())
+    {
+        return known;
+    }
+    let aqs = HSTRING::from(format!("System.Devices.ContainerId:=\"{{{key}}}\""));
+    let no_props: IIterable<HSTRING> = Vec::<HSTRING>::new().into();
+    let ids: Option<Vec<String>> =
+        DeviceInformation::FindAllAsyncWithKindAqsFilterAndAdditionalProperties(
+            &aqs,
+            &no_props,
+            DeviceInformationKind::Device,
+        )
+        .and_then(|op| op.get())
+        .ok()
+        .map(|found| {
+            (0..found.Size().unwrap_or(0))
+                .filter_map(|i| found.GetAt(i).ok())
+                .filter_map(|d| d.Id().ok())
+                .map(|id| id.to_string())
+                .collect()
+        });
+    // If the lookup fails, leave the endpoint out rather than guess.
+    let jack = ids.is_some_and(|ids| is_plug_container(&ids));
+    if let Ok(mut cache) = JACK_CONTAINERS.lock() {
+        cache.get_or_insert_with(HashMap::new).insert(key, jack);
+    }
+    jack
+}
+
+/// The computer's own active audio endpoints, including what's plugged into
+/// its jack. Bluetooth and USB outputs are left out.
 fn active_endpoints() -> Vec<Endpoint> {
     unsafe {
         let Ok(enumerator) =
@@ -144,10 +202,13 @@ fn active_endpoints() -> Vec<Endpoint> {
                 let Ok(store) = device.OpenPropertyStore(STGM_READ) else {
                     continue;
                 };
-                let container = store
+                let Ok(container) = store
                     .GetValue(&PKEY_Device_ContainerId)
-                    .and_then(|v| PropVariantToGUID(&v));
-                if container.ok() != Some(MACHINE_CONTAINER) {
+                    .and_then(|v| PropVariantToGUID(&v))
+                else {
+                    continue;
+                };
+                if !is_jack_container(&container) {
                     continue;
                 }
                 let form_factor = store
@@ -348,6 +409,23 @@ mod tests {
         // A headset output counts as having a mic.
         let headset = endpoint(true, HEADSET, "Realtek(R) Audio");
         assert_eq!(jack_state(&[headset]), Some(Jack::Headset));
+    }
+
+    #[test]
+    fn tells_the_jacks_containers_from_devices() {
+        // The jack's: no hardware, or only its endpoints.
+        assert!(is_plug_container(&[]));
+        assert!(is_plug_container(&[
+            r"SWD\MMDEVAPI\{0.0.0.00000000}.{8cc2c256-3041-45ab-876a-323d70954d44}".into()
+        ]));
+        // A USB audio adapter and a Bluetooth headset bring their hardware.
+        assert!(!is_plug_container(&[
+            r"SWD\MMDEVAPI\{0.0.0.00000000}.{1f15b429-97d1-4558-aa07-f2c6e46d1b94}".into(),
+            r"USB\VID_0020&PID_0B21\20210726905926".into()
+        ]));
+        assert!(!is_plug_container(&[
+            r"BTHENUM\DEV_3E781D8557F0\7&1E98AE4D&0&BLUETOOTHDEVICE_3E781D8557F0".into()
+        ]));
     }
 
     #[test]
