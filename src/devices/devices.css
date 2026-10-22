@@ -190,3 +190,8 @@
 
 /* On disconnect the device stays in view, shrunk a little, dimmed and gray. */
 @keyframes da-leave { to { transform: scale(0.92); opacity: 0.5; } }
+
+/* Still: drawn where the connect animation ends, for lists. Every animation
+   jumps to its last frame. */
+.device-art.still,
+.device-art.still * { animation-duration: 0s !important; animation-delay: 0s !important; }

@@ -527,10 +527,45 @@ pub struct BtBudsEvent {
     pub battery: crate::buds::BudsBattery,
 }
 
+/// When each device's buds were last read, by name.
+static BUDS_READ: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+/// How soon a device's buds can be read again for Battery hub.
+const BUDS_REFRESH: Duration = Duration::from_secs(90);
+
+/// Whether a device's buds were read too recently to read again.
+fn buds_read_recently(name: &str) -> bool {
+    BUDS_READ
+        .lock()
+        .ok()
+        .and_then(|read| read.as_ref()?.get(name).copied())
+        .is_some_and(|at| at.elapsed() < BUDS_REFRESH)
+}
+
+/// Reads each bud's and the case's battery again for the connected audio
+/// devices, for Battery hub; results arrive as `bluetooth-buds`. A device
+/// read in the last 90 seconds is skipped.
+#[tauri::command]
+pub async fn bluetooth_refresh_buds() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        com_init();
+        for device in list_sync() {
+            if device.connected && device.kind == "audio" && !buds_read_recently(&device.name) {
+                follow_up_buds(device.id, device.name);
+            }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// Reads each bud's and the case's battery for an audio device that just
 /// connected, if it's earbuds that report them, and sends it as
 /// `bluetooth-buds`.
 fn follow_up_buds(id: String, name: String) {
+    if let Ok(mut read) = BUDS_READ.lock() {
+        read.get_or_insert_with(HashMap::new)
+            .insert(name.clone(), Instant::now());
+    }
     std::thread::spawn(move || {
         com_init();
         let Some(container) = CONTAINERS

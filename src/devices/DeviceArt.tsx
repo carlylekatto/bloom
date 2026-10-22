@@ -75,20 +75,23 @@ function playPulses(svg: SVGSVGElement) {
 /**
  * One device drawing. `phase` "play" runs its connect animation, "leave" the
  * disconnect; either replays when `runId` changes. `graphite` switches to
- * the dark palette.
+ * the dark palette. `still` draws where the connect animation ends, without
+ * playing it, for lists.
  */
 export function DeviceArt({
 	art,
 	phase,
 	runId,
 	size,
-	graphite = false
+	graphite = false,
+	still = false
 }: {
 	art: DeviceArtKey;
 	phase: "play" | "leave";
 	runId: number;
 	size: number;
 	graphite?: boolean;
+	still?: boolean;
 }) {
 	const ref = useRef<SVGSVGElement>(null);
 
@@ -101,13 +104,13 @@ export function DeviceArt({
 		for (const p of svg.querySelectorAll<SVGGeometryElement>(".draw")) {
 			p.style.setProperty("--len", String(p.getTotalLength() + 1));
 		}
-		const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+		const reduced = still || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 		const caseKind = art === "stem-buds" ? "stem" : art === "round-buds" ? "round" : null;
 		const dev = svg.querySelector(".dev");
 		const stop = caseKind && dev ? animateCase(caseKind, dev, phase, reduced) : () => {};
 		if (phase === "play" && !reduced) playPulses(svg);
 		return stop;
-	}, [art, phase, runId]);
+	}, [art, phase, runId, still]);
 
 	return (
 		<svg
@@ -117,7 +120,7 @@ export function DeviceArt({
 			viewBox="0 0 100 100"
 			width={size}
 			height={size}
-			className={`device-art ${phase}${graphite ? " graphite" : ""}`}
+			className={`device-art ${phase}${graphite ? " graphite" : ""}${still ? " still" : ""}`}
 			style={{ overflow: "visible", flex: "none" }}
 			aria-hidden="true"
 		/>

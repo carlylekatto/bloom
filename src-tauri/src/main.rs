@@ -242,7 +242,8 @@ fn main() {
             bluetooth::bluetooth_discovery,
             bluetooth::bluetooth_pair,
             bluetooth::bluetooth_pairing_respond,
-            bluetooth::bluetooth_unpair
+            bluetooth::bluetooth_unpair,
+            bluetooth::bluetooth_refresh_buds
         ])
         .setup(|app| {
             init_taskbar_marker(app.handle());

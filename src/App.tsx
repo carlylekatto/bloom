@@ -46,6 +46,8 @@ import { BluetoothPanel } from "./components/BluetoothPanel";
 import { DeviceArt, DeviceArtDefs } from "./devices/DeviceArt";
 import { deviceArtFor } from "./devices/deviceArtFor";
 import { deviceLookFor } from "./devices/deviceLooks";
+import type { BudLevel, BudsBattery } from "./devices/batteryHub";
+import { BatteryHubPanel } from "./components/BatteryHubPanel";
 import { usbArtFor, usbDisplayName, type UsbIdentity } from "./devices/usbArtFor";
 import type { DeviceArtKey } from "./devices/art";
 import {
@@ -77,8 +79,8 @@ import {
  *   Dragging files onto the notch also opens the shelf. Wheel/swipe switches
  *   between tool panels, including when a live activity occupies the pill.
  */
-type NotchPanel = "calendar" | "command-center";
-const NOTCH_PANELS: readonly NotchPanel[] = ["calendar", "command-center"];
+type NotchPanel = "calendar" | "command-center" | "battery";
+const NOTCH_PANELS: readonly NotchPanel[] = ["calendar", "command-center", "battery"];
 const asNotchPanel = (value: unknown): NotchPanel | null =>
 	NOTCH_PANELS.includes(value as NotchPanel) ? (value as NotchPanel) : null;
 
@@ -461,21 +463,10 @@ type BloomMode =
 	| "shelf"
 	| "wifi"
 	| "bluetooth"
+	| "battery"
 	| "device";
 
 // A device that just connected or disconnected, shown briefly in the pill.
-interface BudLevel {
-	level: number;
-	charging: boolean;
-}
-
-/** Each bud's and the case's battery, from the backend's `bluetooth-buds`. */
-interface BudsBattery {
-	left: BudLevel | null;
-	right: BudLevel | null;
-	case: BudLevel | null;
-}
-
 interface DeviceAlert {
 	// The device's id, so a later battery report can find its alert.
 	id: string;
@@ -835,6 +826,8 @@ function App() {
 		dismiss: dismissAnnouncement
 	} = useAnnouncement();
 	const [deviceAlert, setDeviceAlert] = useState<DeviceAlert | null>(null);
+	// Each connected earbud's own levels, as last reported, for Battery hub.
+	const [budsById, setBudsById] = useState<Record<string, BudsBattery>>({});
 	// True from an alert appearing until its exit animation has finished, so
 	// the clock row only comes back once the alert has faded out.
 	const [deviceAlertOnScreen, setDeviceAlertOnScreen] = useState(false);
@@ -1710,7 +1703,8 @@ function App() {
 			prev === "status" ||
 			prev === "shelf" ||
 			prev === "wifi" ||
-			prev === "bluetooth"
+			prev === "bluetooth" ||
+			prev === "battery"
 				? restingModeRef.current
 				: prev
 		);
@@ -2292,6 +2286,14 @@ function App() {
 				connected: payload.connected,
 				battery: payload.battery
 			});
+			// A disconnected device's bud levels are out of date by its next connect.
+			if (!payload.connected) {
+				setBudsById((all) => {
+					if (!(payload.id in all)) return all;
+					const { [payload.id]: _gone, ...rest } = all;
+					return rest;
+				});
+			}
 		});
 		// Windows often reports a battery level a moment after the device
 		// connects; fill it into the alert if that device is still showing.
@@ -2305,6 +2307,7 @@ function App() {
 		const unlistenBuds = listen<BudsBattery & { id: string }>("bluetooth-buds", ({ payload }) => {
 			const { id, ...buds } = payload;
 			setDeviceAlert((alert) => (alert && alert.id === id && alert.connected ? { ...alert, buds } : alert));
+			setBudsById((all) => ({ ...all, [id]: buds }));
 		});
 		const unlistenUsb = listen<UsbConnection>("usb-connection", ({ payload }) => {
 			showDeviceAlert({
@@ -3148,7 +3151,7 @@ function App() {
 		if (isCalendarMode) return 480;
 		if (bloomMode === "shelf") return 380;
 		if (bloomMode === "command-center" && isOpen) return 350;
-		if (bloomMode === "wifi" || bloomMode === "bluetooth") return 350;
+		if (bloomMode === "wifi" || bloomMode === "bluetooth" || bloomMode === "battery") return 350;
 		if (showMusicOnStatusHover) {
 			return 170 + (settingsVisualizerEnabled ? 30 : 0);
 		}
@@ -3212,7 +3215,7 @@ function App() {
 					: 0;
 			return (isOpen ? 230 : 36) + (appMixerOpen ? 120 : 0) + monitorRowsPx;
 		}
-		if (bloomMode === "wifi" || bloomMode === "bluetooth") return 300;
+		if (bloomMode === "wifi" || bloomMode === "bluetooth" || bloomMode === "battery") return 300;
 		if (bloomMode === "status") return 36;
 		if (isMusicMode && isOpen) {
 			const hasProgressBar = (mediaInfo.duration_ms ?? 0) > 0;
@@ -3989,6 +3992,21 @@ function App() {
 												onBack={() => setBloomMode("command-center")}
 												onPinChange={setNotchPinned}
 											/>
+										</motion.div>
+									)}
+								</AnimatePresence>
+
+								{/* Battery hub: every connected device's battery, by priority */}
+								<AnimatePresence>
+									{bloomMode === "battery" && (
+										<motion.div
+											key="battery-view"
+											initial={{ opacity: 0 }}
+											animate={{ opacity: 1 }}
+											exit={{ opacity: 0, filter: "blur(4px)", transition: { duration: 0.1 } }}
+											transition={{ type: "spring", stiffness: 400, damping: 30 }}
+										>
+											<BatteryHubPanel buds={budsById} lowThreshold={lowBatteryThreshold} />
 										</motion.div>
 									)}
 								</AnimatePresence>
