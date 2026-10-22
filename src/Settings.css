@@ -239,15 +239,8 @@ body {
 	margin: 2px 2px 18px;
 }
 
-.settings-page-heading > span {
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 1.2px;
-	color: var(--text-muted);
-}
-
 .settings-page-heading h1 {
-	margin: 4px 0 3px;
+	margin: 0 0 3px;
 	font-size: 26px;
 	font-weight: 680;
 	letter-spacing: -0.8px;

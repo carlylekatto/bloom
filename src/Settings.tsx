@@ -168,7 +168,6 @@ function SettingsApp() {
 						</div>
 					)}
 					<div className="settings-page-heading">
-						<span>PERSONALIZE BLOOM</span>
 						<h1>{TABS.find((tab) => tab.id === activeTab)?.label}</h1>
 						<p>{TAB_COPY[activeTab]}</p>
 					</div>
