@@ -143,13 +143,16 @@ jobs:
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PASSWORD: ${{ secrets.TAURI_SIGNING_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Bloom ${{ github.ref_name }}"
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
-          includeUpdaterJson: true
-          updaterJsonPreferNsis: true
+          # This fork's updater is deliberately inert: plugins.updater carries an
+          # empty pubkey and no endpoints, so the plugin can never reach a
+          # release. Producing an updater manifest here would need a signing
+          # key this repository does not have, and the workflow would fail on
+          # every tag. Upstream sets this to true because it ships a signed
+          # updater; here it is off, and the installers are published unsigned.
+          includeUpdaterJson: false
