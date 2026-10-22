@@ -18,6 +18,17 @@ export interface TrayApp {
 	window_handles: number[];
 }
 
+// A background item must never fall through to the executable launch route.
+// An app with more than one tray icon has no single icon to activate, so the
+// user is told to pick one from the context menu rather than the dock
+// launching the executable behind the app's back.
+export function backgroundTrayId(app: AppInfo): string {
+	if (app.tray_ids?.length !== 1) {
+		throw new Error("Select this app's tray icon from its dock context menu.");
+	}
+	return app.tray_ids[0];
+}
+
 // Steam ignores a single tray activation. For a pinned background item only,
 // launch its saved target if no window appeared after the tray click. Coalesce
 // repeated clicks and cancel both timers and in-flight checks on dock teardown.

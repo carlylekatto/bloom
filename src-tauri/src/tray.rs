@@ -889,6 +889,62 @@ unsafe fn wait_for_menu_close(menu: HWND, bottom: i32) {
     }
 }
 
+/// Recover only a uniquely identified, titled main window. Message-only icon
+/// owners, tool windows and ambiguous multi-window apps must never be shown.
+///
+/// This is the fallback when a tray icon cannot be activated through its
+/// notification area at all. Without it, clicking a tray app in the dock does
+/// nothing and the user is left with no explanation.
+unsafe fn restore_existing_window(path: &str) -> bool {
+    // A host process runs more than one app: Explorer's own windows, a
+    // browser's windows, a UWP host's windows. Showing one of those would
+    // bring the wrong thing forward, and for Explorer it would also disturb
+    // the shell, so these are never touched.
+    let shared_host = std::path::Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_ascii_lowercase())
+        .is_some_and(|name| {
+            matches!(
+                name.as_str(),
+                "explorer.exe"
+                    | "msedge.exe"
+                    | "chrome.exe"
+                    | "brave.exe"
+                    | "applicationframehost.exe"
+            )
+        });
+    if shared_host {
+        return false;
+    }
+    let candidates: Vec<_> = process_windows()
+        .into_iter()
+        .filter(|(handle, exe)| {
+            let hwnd = HWND(*handle as _);
+            exe.eq_ignore_ascii_case(path)
+                && GetAncestor(hwnd, GA_ROOT) == hwnd
+                && GetWindow(hwnd, GW_OWNER).is_ok_and(|owner| owner.is_invalid())
+                && GetWindowLongPtrW(hwnd, GWL_STYLE) as u32 & WS_CAPTION.0 == WS_CAPTION.0
+                && GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 == 0
+                && GetWindowTextLengthW(hwnd) > 0
+        })
+        .collect();
+    // More than one candidate is ambiguous, and showing the wrong window is
+    // worse than showing none.
+    let [(handle, _)] = candidates.as_slice() else {
+        return false;
+    };
+    let hwnd = HWND(*handle as _);
+    // Revalidate ownership immediately before changing a window: handles can
+    // disappear or be reused while Explorer's UIA provider is responding.
+    let mut pid = 0;
+    GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    if !crate::commands::process_image_path(pid).is_some_and(|exe| exe.eq_ignore_ascii_case(path)) {
+        return false;
+    }
+    let _ = ShowWindow(hwnd, SW_RESTORE);
+    SetForegroundWindow(hwnd).as_bool()
+}
+
 pub fn interact(key: &str, context_menu: bool) -> Result<(), String> {
     unsafe {
         let _com = ComApartment::new()?;
@@ -906,21 +962,35 @@ pub fn interact(key: &str, context_menu: bool) -> Result<(), String> {
             let _ = options.SetTransactionTimeout(2000);
         }
         let mut exposure = TrayExposure::new()?;
-        let element = if icon.promoted {
-            find_promoted_icon(&automation, icon)?
-        } else {
-            exposure.expose_overflow(&automation)?;
-            // The overflow's tree fills in over a few frames after it opens;
-            // an early read sees too few buttons, so give it a moment.
-            let mut found = find_overflow_icon(&automation, &icons, icon);
-            for _ in 0..4 {
-                if found.is_ok() {
-                    break;
+        let element = (|| {
+            if icon.promoted {
+                find_promoted_icon(&automation, icon)
+            } else {
+                exposure.expose_overflow(&automation)?;
+                // The overflow's tree fills in over a few frames after it opens;
+                // an early read sees too few buttons, so give it a moment.
+                let mut found = find_overflow_icon(&automation, &icons, icon);
+                for _ in 0..4 {
+                    if found.is_ok() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(60));
+                    found = find_overflow_icon(&automation, &icons, icon);
                 }
-                std::thread::sleep(std::time::Duration::from_millis(60));
-                found = find_overflow_icon(&automation, &icons, icon);
+                found
             }
-            found?
+        })();
+        let element = match element {
+            Ok(element) => element,
+            Err(error) => {
+                // Restore Explorer before foregrounding the app. Never relaunch
+                // an executable, and never substitute a window for a tray menu.
+                drop(exposure);
+                if !context_menu && restore_existing_window(&icon.path) {
+                    return Ok(());
+                }
+                return Err(error);
+            }
         };
         Shell_NotifyIconGetRect(&icon.identifier)
             .map_err(|_| "This tray icon is no longer running.")?;

@@ -11,6 +11,7 @@ import { reloadIfMirrorWasStale } from "./hooks/settingsMirror";
 
 import {
 	createTrayLaunchFallback,
+	backgroundTrayId,
 	mergeTrayApps,
 	selectDockTrayApps,
 	type AppInfo,
@@ -739,8 +740,8 @@ const Dock = memo(function Dock() {
 		try {
 			if (app.path === "start") {
 				await invoke("open_app", { appName: "start" });
-			} else if (app.is_background && app.tray_ids?.length === 1) {
-				await invoke("activate_tray_icon", { trayId: app.tray_ids[0] });
+			} else if (app.is_background) {
+				await invoke("activate_tray_icon", { trayId: backgroundTrayId(app) });
 				trayLaunchFallbackRef.current?.schedule(app);
 			} else if (app.all_hwnds && app.all_hwnds.length > 1) {
 				// Several windows: bring the most recent forward, then cycle.
@@ -910,9 +911,7 @@ const Dock = memo(function Dock() {
 	const hideTaskView = () => {
 		setDockTaskView(false);
 		localStorage.setItem("bloom-dock-task-view", "false");
-		invoke("save_setting", { key: "bloom-dock-task-view", value: "false" }).catch(
-			showActionError
-		);
+		invoke("save_setting", { key: "bloom-dock-task-view", value: "false" }).catch(showActionError);
 		closeMenu();
 	};
 
@@ -1861,42 +1860,42 @@ const Dock = memo(function Dock() {
 					{!contextMenu.extra &&
 						!contextMenu.taskView &&
 						(!contextMenu.app || contextMenu.app.path === "start") && (
-						<div
-							style={{
-								maxHeight: Math.max(64, window.innerHeight / scale - 200),
-								overflowY: "auto"
-							}}
-						>
-							{(contextMenu.app
-								? [
-										["installed-apps", "Installed Apps"],
-										["power-options", "Power Options"],
-										["device-manager", "Device Manager"],
-										["network-connections", "Network Connections"],
-										["disk-management", "Disk Management"],
-										["computer-management", "Computer Management"],
-										["task-manager", "Task Manager"],
-										["settings", "Settings"]
-									]
-								: [
-										["task-manager", "Task Manager"],
-										["taskbar-settings", "Taskbar Settings"]
-									]
-							).map(([action, label]) => (
-								<div
-									key={action}
-									className="menu-item"
-									onClick={() => {
-										closeMenu();
-										invoke("open_system_action", { action }).catch(showActionError);
-									}}
-								>
-									{label}
-								</div>
-							))}
-							<div className="menu-divider" />
-						</div>
-					)}
+							<div
+								style={{
+									maxHeight: Math.max(64, window.innerHeight / scale - 200),
+									overflowY: "auto"
+								}}
+							>
+								{(contextMenu.app
+									? [
+											["installed-apps", "Installed Apps"],
+											["power-options", "Power Options"],
+											["device-manager", "Device Manager"],
+											["network-connections", "Network Connections"],
+											["disk-management", "Disk Management"],
+											["computer-management", "Computer Management"],
+											["task-manager", "Task Manager"],
+											["settings", "Settings"]
+										]
+									: [
+											["task-manager", "Task Manager"],
+											["taskbar-settings", "Taskbar Settings"]
+										]
+								).map(([action, label]) => (
+									<div
+										key={action}
+										className="menu-item"
+										onClick={() => {
+											closeMenu();
+											invoke("open_system_action", { action }).catch(showActionError);
+										}}
+									>
+										{label}
+									</div>
+								))}
+								<div className="menu-divider" />
+							</div>
+						)}
 					{contextMenu.extra ? (
 						<>
 							<div
