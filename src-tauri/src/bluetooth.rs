@@ -142,7 +142,7 @@ fn find_all(aqs: &HSTRING, keys: &[&str], kind: DeviceInformationKind) -> Vec<De
         &props(keys),
         kind,
     )
-    .and_then(|op| op.get()) else {
+    .and_then(|op| op.join()) else {
         return Vec::new();
     };
     (0..found.Size().unwrap_or(0))
@@ -213,12 +213,12 @@ fn le_form(category: u16, subcategory: u16) -> Option<&'static str> {
 
 /// A device's kind and, for audio devices, its form.
 fn device_type(id: &HSTRING) -> (&'static str, Option<&'static str>) {
-    if let Ok(device) = BluetoothDevice::FromIdAsync(id).and_then(|op| op.get()) {
+    if let Ok(device) = BluetoothDevice::FromIdAsync(id).and_then(|op| op.join()) {
         if let Ok(raw) = device.ClassOfDevice().and_then(|c| c.RawValue()) {
             return (classic_kind(raw), classic_form(raw));
         }
     }
-    if let Ok(device) = BluetoothLEDevice::FromIdAsync(id).and_then(|op| op.get()) {
+    if let Ok(device) = BluetoothLEDevice::FromIdAsync(id).and_then(|op| op.join()) {
         if let Ok(appearance) = device.Appearance() {
             let category = appearance.Category().unwrap_or(0);
             let subcategory = appearance.SubCategory().unwrap_or(0);
@@ -859,7 +859,7 @@ pub async fn bluetooth_pair(id: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         com_init();
         let info = DeviceInformation::CreateFromIdAsync(&HSTRING::from(id.as_str()))
-            .and_then(|op| op.get())
+            .and_then(|op| op.join())
             .map_err(|e| e.message())?;
         let custom = info
             .Pairing()
@@ -882,7 +882,7 @@ pub async fn bluetooth_pair(id: String) -> Result<(), String> {
                 | DevicePairingKinds::ProvidePin.0
                 | DevicePairingKinds::ConfirmPinMatch.0,
         );
-        let result = custom.PairAsync(kinds).and_then(|op| op.get());
+        let result = custom.PairAsync(kinds).and_then(|op| op.join());
         let _ = custom.RemovePairingRequested(token);
         if let Ok(mut answer) = PAIRING_ANSWER.lock() {
             *answer = None;
@@ -917,10 +917,10 @@ pub async fn bluetooth_unpair(id: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         com_init();
         let status = DeviceInformation::CreateFromIdAsync(&HSTRING::from(id.as_str()))
-            .and_then(|op| op.get())
+            .and_then(|op| op.join())
             .and_then(|info| info.Pairing())
             .and_then(|pairing| pairing.UnpairAsync())
-            .and_then(|op| op.get())
+            .and_then(|op| op.join())
             .and_then(|result| result.Status())
             .map_err(|e| e.message())?;
         if status == DeviceUnpairingResultStatus::Unpaired

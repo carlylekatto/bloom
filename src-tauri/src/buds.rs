@@ -353,7 +353,7 @@ fn read_rfcomm(
     // device again can block for a long time.
     let services = device
         .GetRfcommServicesForIdWithCacheModeAsync(&id, BluetoothCacheMode::Cached)
-        .and_then(|op| op.get())
+        .and_then(|op| op.join())
         .and_then(|r| r.Services())
         .ok()?;
     let service = services.GetAt(0).ok()?;
@@ -375,13 +375,13 @@ fn read_rfcomm(
             &service.ConnectionServiceName().ok()?,
             SocketProtectionLevel::BluetoothEncryptionAllowNullAuthentication,
         )
-        .and_then(|op| op.get())
+        .and_then(|op| op.join())
         .ok()?;
     let reader = DataReader::CreateDataReader(&socket.InputStream().ok()?).ok()?;
     let _ = reader.SetInputStreamOptions(InputStreamOptions::Partial);
     let mut received = Vec::new();
     let mut found = None;
-    while let Ok(count) = reader.LoadAsync(512).and_then(|op| op.get()) {
+    while let Ok(count) = reader.LoadAsync(512).and_then(|op| op.join()) {
         if count == 0 {
             break;
         }
@@ -406,7 +406,7 @@ fn read_rfcomm(
 /// Samsung's channel. `classic_id` is the device's classic Bluetooth id.
 pub fn read_rfcomm_battery(classic_id: &str, name: &str, wait: Duration) -> Option<BudsBattery> {
     let device = BluetoothDevice::FromIdAsync(&HSTRING::from(classic_id))
-        .and_then(|op| op.get())
+        .and_then(|op| op.join())
         .ok()?;
     if let Some(battery) = read_rfcomm(&device, FAST_PAIR_STREAM, wait, fast_pair_battery) {
         return Some(battery);

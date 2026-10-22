@@ -103,7 +103,7 @@ fn container_is_usb(container: &GUID) -> bool {
         &props(&[]),
         DeviceInformationKind::Device,
     )
-    .and_then(|op| op.get()) else {
+    .and_then(|op| op.join()) else {
         return false;
     };
     (0..found.Size().unwrap_or(0))

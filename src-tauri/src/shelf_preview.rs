@@ -135,18 +135,18 @@ fn pdf_thumbnail(path: &str) -> Option<String> {
 
     com_init();
     let render = || -> windows::core::Result<Vec<u8>> {
-        let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?.get()?;
-        let document = PdfDocument::LoadFromFileAsync(&file)?.get()?;
+        let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?.join()?;
+        let document = PdfDocument::LoadFromFileAsync(&file)?.join()?;
         let page = document.GetPage(0)?;
         let options = PdfPageRenderOptions::new()?;
         // Height follows the page's aspect ratio. The default output is PNG.
         options.SetDestinationWidth(256)?;
         let stream = InMemoryRandomAccessStream::new()?;
         page.RenderWithOptionsToStreamAsync(&stream, &options)?
-            .get()?;
+            .join()?;
         let size = stream.Size()? as u32;
         let reader = DataReader::CreateDataReader(&stream.GetInputStreamAt(0)?)?;
-        reader.LoadAsync(size)?.get()?;
+        reader.LoadAsync(size)?.join()?;
         let mut bytes = vec![0u8; size as usize];
         reader.ReadBytes(&mut bytes)?;
         Ok(bytes)

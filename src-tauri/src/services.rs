@@ -987,7 +987,7 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
             }
 
             let mut manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()
-                .and_then(|op| op.get())
+                .and_then(|op| op.join())
                 .ok();
             let mut last_processed_media = std::time::Instant::now();
             let mut last_device_check = std::time::Instant::now();
@@ -1044,7 +1044,7 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
 
                 if manager.is_none() {
                     manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()
-                        .and_then(|op| op.get())
+                        .and_then(|op| op.join())
                         .ok();
                 }
                 while let Ok(cmd) = rx.try_recv() {
@@ -1146,7 +1146,7 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
 										.and_then(|p| p.PlaybackStatus().ok())
 										== Some(GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing);
                                     if let Ok(props) =
-                                        session.TryGetMediaPropertiesAsync().and_then(|op| op.get())
+                                        session.TryGetMediaPropertiesAsync().and_then(|op| op.join())
                                     {
                                         let title = props.Title().unwrap_or_default().to_string();
                                         if !title.is_empty() {
@@ -1179,7 +1179,7 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
                                                         .ok()?
                                                         .OpenReadAsync()
                                                         .ok()?
-                                                        .get()
+                                                        .join()
                                                         .ok()?;
                                                     let content_type = stream
                                                         .ContentType()
@@ -1199,7 +1199,7 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
                                                         let loaded = reader
                                                             .LoadAsync(chunk_size)
                                                             .ok()?
-                                                            .get()
+                                                            .join()
                                                             .ok()?;
                                                         if loaded == 0 {
                                                             break;
