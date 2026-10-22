@@ -16,7 +16,12 @@ export interface DeviceIdentity {
 const AIRPODS_MAX = /\bair ?pods max\b/i;
 const STEM_BUDS = /\b(air ?pods|ear ?pods|freebuds|stem)\b/i;
 const EARBUDS = /\b(buds?|pods|earbuds?|earphones?|tws|in-?ear|ear \(\d|tone free)/i;
-const NECKBAND = /\b(neckband|bullets wireless|tone (?!free)\w+|collar)\b/i;
+// Bluetooth has no neckband class (they report the same one as headphones),
+// so well-known neckband lines are matched by name: Sony's WI- models,
+// boAt Rockerz 1xx-3xx (4xx and up are headphones), JBL Tune 2xxBT, OnePlus
+// Bullets, realme Buds Wireless, LG Tone and HBS, Samsung Level U.
+const NECKBAND =
+	/\b(neck ?band|bullets wireless|buds wireless|tone (?!free)\w+|collar|wi-[a-z]*\d|rockerz ?[1-3]\d\d|tune ?2\d\d ?bt|hbs-?\d|level u|probass curve)/i;
 const SPEAKER = /\b(speaker|soundlink|flip|charge|clip|boom|wonderboom|soundcore|sound ?bar|home ?pod|echo|nest)\b/i;
 const HEADPHONES = /\b(headphones?|wh-|xm\d|qc|quietcomfort|max|studio|momentum)\b/i;
 

@@ -44,6 +44,8 @@ import { WifiPanel } from "./components/WifiPanel";
 import { BluetoothPanel } from "./components/BluetoothPanel";
 import { DeviceArt, DeviceArtDefs } from "./devices/DeviceArt";
 import { deviceArtFor } from "./devices/deviceArtFor";
+import { deviceLookFor } from "./devices/deviceLooks";
+import { usbArtFor, usbDisplayName, type UsbIdentity } from "./devices/usbArtFor";
 import type { DeviceArtKey } from "./devices/art";
 import {
 	Cpu,
@@ -467,6 +469,8 @@ interface DeviceAlert {
 	name: string;
 	connected: boolean;
 	battery: number | null;
+	// A USB device, which has no list to open when the alert is clicked.
+	usb?: boolean;
 	// Changes on every alert, so the drawing replays its animation.
 	runId: number;
 }
@@ -479,6 +483,13 @@ interface BluetoothConnection {
 	form: string | null;
 	connected: boolean;
 	battery: number | null;
+}
+
+/** A USB device plugged in or removed, from the backend's `usb-connection`. */
+interface UsbConnection extends UsbIdentity {
+	/** The device's container id. */
+	id: string;
+	connected: boolean;
 }
 
 // What a device alert says: wired and USB devices are plugged in, cards
@@ -501,6 +512,8 @@ function deviceAlertStatus(art: DeviceArtKey, connected: boolean): string {
 
 // How long a device alert stays in the pill.
 const DEVICE_ALERT_MS = { connected: 4200, disconnected: 2600 };
+// How many alerts for other devices can wait behind the one showing.
+const DEVICE_ALERT_QUEUE = 3;
 
 /** A small ring showing a device's battery, with the level in the middle. */
 function DeviceBatteryRing({ level }: { level: number }) {
@@ -865,6 +878,7 @@ function App() {
 	const isAnyInteraction = isHovered || isNotchHovered || isEdgeHovered;
 	const isHidden =
 		!startupAnimating &&
+		!deviceAlertOnScreen &&
 		((notchMode === "smart" && isOverlapped && interactionState === "none") ||
 			(notchMode === "peek" && interactionState === "none" && !eventPeek));
 
@@ -2181,28 +2195,48 @@ function App() {
 	// A device connecting or disconnecting takes the pill for a few seconds,
 	// like the Dynamic Island: its drawing, name and battery. It never takes
 	// over a notch the user has open, an announcement or the shelf. In peek
-	// mode it shows the notch for as long as it lasts.
-	const showDeviceAlert = useCallback(
-		(alert: Omit<DeviceAlert, "runId">) => {
-			const mode = bloomModeRef.current;
-			if (isOpenRef.current || mode === "announcement" || mode === "shelf") return;
-			const duration = alert.connected ? DEVICE_ALERT_MS.connected : DEVICE_ALERT_MS.disconnected;
-			setDeviceAlert({ ...alert, runId: Date.now() });
-			setDeviceAlertOnScreen(true);
-			setBloomMode("device");
-			if (notchMode === "peek") triggerEventPeek(duration);
-			if (deviceAlertTimerRef.current) clearTimeout(deviceAlertTimerRef.current);
-			deviceAlertTimerRef.current = setTimeout(() => setDeviceAlert(null), duration);
-		},
-		[notchMode, triggerEventPeek]
-	);
+	// and smart modes it shows the notch for as long as it lasts.
+	//
+	// Alerts for other devices wait their turn (two drives plugged in
+	// together show one after the other); a newer alert for the device on
+	// screen replaces it. The queue is short: a burst of devices shouldn't
+	// hold the notch for long.
+	const deviceAlertQueueRef = useRef<Omit<DeviceAlert, "runId">[]>([]);
+	const presentDeviceAlertRef = useRef<(alert: Omit<DeviceAlert, "runId">) => void>(() => {});
+	presentDeviceAlertRef.current = (alert) => {
+		const duration = alert.connected ? DEVICE_ALERT_MS.connected : DEVICE_ALERT_MS.disconnected;
+		setDeviceAlert({ ...alert, runId: Date.now() });
+		setDeviceAlertOnScreen(true);
+		setBloomMode("device");
+		if (notchMode === "peek") triggerEventPeek(duration);
+		if (deviceAlertTimerRef.current) clearTimeout(deviceAlertTimerRef.current);
+		deviceAlertTimerRef.current = setTimeout(() => {
+			const next = deviceAlertQueueRef.current.shift();
+			if (next && !isOpenRef.current) presentDeviceAlertRef.current(next);
+			else {
+				deviceAlertQueueRef.current = [];
+				setDeviceAlert(null);
+			}
+		}, duration);
+	};
+	const showDeviceAlert = useCallback((alert: Omit<DeviceAlert, "runId">) => {
+		const mode = bloomModeRef.current;
+		if (isOpenRef.current || mode === "announcement" || mode === "shelf") return;
+		const current = deviceAlertRef.current;
+		if (current && current.id !== alert.id) {
+			const queue = deviceAlertQueueRef.current.filter((queued) => queued.id !== alert.id);
+			deviceAlertQueueRef.current = [...queue, alert].slice(-DEVICE_ALERT_QUEUE);
+			return;
+		}
+		presentDeviceAlertRef.current(alert);
+	}, []);
 
 	useEffect(() => {
 		if (windowLabel !== "main") return;
 		const unlistenConnection = listen<BluetoothConnection>("bluetooth-connection", ({ payload }) => {
 			showDeviceAlert({
 				id: payload.id,
-				art: deviceArtFor(payload),
+				art: deviceLookFor(payload.name) ?? deviceArtFor(payload),
 				name: payload.name,
 				connected: payload.connected,
 				battery: payload.battery
@@ -2215,9 +2249,20 @@ function App() {
 				alert && alert.id === payload.id && alert.connected ? { ...alert, battery: payload.battery } : alert
 			);
 		});
+		const unlistenUsb = listen<UsbConnection>("usb-connection", ({ payload }) => {
+			showDeviceAlert({
+				id: payload.id,
+				art: usbArtFor(payload),
+				name: usbDisplayName(payload),
+				connected: payload.connected,
+				battery: null,
+				usb: true
+			});
+		});
 		return () => {
 			unlistenConnection.then((f) => f());
 			unlistenBattery.then((f) => f());
+			unlistenUsb.then((f) => f());
 		};
 	}, [windowLabel, showDeviceAlert]);
 
@@ -2229,6 +2274,17 @@ function App() {
 		const w = window as unknown as Record<string, unknown>;
 		w.__bloomDeviceAlert = (art: DeviceArtKey, name: string, connected = true, battery: number | null = null) =>
 			showDeviceAlert({ id: "dev", art, name, connected, battery });
+		// __bloomUsb("disk", "SanDisk Cruzer Blade USB Device", true, "a")
+		// stands in for the backend's usb-connection event.
+		w.__bloomUsb = (kind: string, name: string, connected = true, id = "usb-dev") =>
+			showDeviceAlert({
+				id,
+				art: usbArtFor({ class: kind, name }),
+				name: usbDisplayName({ class: kind, name }),
+				connected,
+				battery: null,
+				usb: true
+			});
 		w.__bloomDeviceBattery = (id: string, battery: number) =>
 			setDeviceAlert((alert) => (alert && alert.id === id && alert.connected ? { ...alert, battery } : alert));
 	}, [showDeviceAlert]);
@@ -4207,7 +4263,12 @@ function App() {
 											className="device-alert"
 											onClick={(e) => {
 												e.stopPropagation();
+												const usb = deviceAlert.usb;
+												deviceAlertQueueRef.current = [];
 												setDeviceAlert(null);
+												// Bluetooth devices open their list; USB ones
+												// have none, so the click just dismisses.
+												if (usb) return;
 												setIsOpen(true);
 												setBloomMode("bluetooth");
 											}}

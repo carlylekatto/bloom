@@ -22,6 +22,27 @@ describe("device art for a connected device", () => {
 		expect(audio("Unknown audio")).toBe("headphones");
 	});
 
+	test("knows neckband lines by name, as their class says headset", () => {
+		for (const name of [
+			"WI-C100",
+			"Sony WI-1000XM2",
+			"boAt Rockerz 255 Pro+",
+			"Rockerz 330",
+			"JBL TUNE215BT",
+			"realme Buds Wireless 3",
+			"Mivi Collar 2",
+			"LG HBS-830",
+			"Samsung Level U"
+		]) {
+			expect(audio(name, "headset")).toBe("neckband");
+		}
+		// Not neckbands: boAt's 4xx and up are headphones, as is JBL's Tune 5xx.
+		expect(audio("Rockerz 460", "headset")).toBe("headphones");
+		expect(audio("JBL TUNE510BT", "headset")).toBe("headphones");
+		expect(audio("Wireless 2", "headset")).toBe("headphones");
+		expect(audio("EF-0080", "headset")).toBe("headphones");
+	});
+
 	test("maps the other kinds", () => {
 		expect(deviceArtFor({ kind: "phone", name: "Pixel 9" })).toBe("phone");
 		expect(deviceArtFor({ kind: "gamepad", name: "Xbox Wireless Controller" })).toBe("controller");
