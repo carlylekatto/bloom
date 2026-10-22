@@ -28,6 +28,7 @@ windows-collections = "0.2"
 windows = { version = "0.61", features = [
 	"Win32_UI_Input_KeyboardAndMouse",
 	"Win32_UI_Shell",
+	"Win32_UI_Shell_Common",
 	"Win32_UI_Shell_PropertiesSystem",
 	"Win32_Storage_Packaging_Appx",
 	"Win32_UI_WindowsAndMessaging",
@@ -44,6 +45,7 @@ windows = { version = "0.61", features = [
 	"Win32_System_Memory",
 	"Win32_System_Com_StructuredStorage",
 	"Win32_System_SystemInformation",
+	"Win32_System_SystemServices",
 	"Win32_System_Wmi",
 	"Win32_Storage_FileSystem",
 	"Win32_System_Ole",
@@ -73,7 +75,6 @@ windows = { version = "0.61", features = [
 	"Win32_Media_KernelStreaming",
 	"System_Power",
 	"Devices_Power",
-	"Win32_System_Power",
 	"Win32_NetworkManagement_IpHelper",
 	"Win32_NetworkManagement_Ndis",
 	"Win32_NetworkManagement_WiFi",
