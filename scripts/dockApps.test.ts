@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	canMatchByProgram,
 	dockIconKey,
 	isSameWebApp,
 	matchesPackagedExecutable,
@@ -181,7 +182,7 @@ describe("packaged executable identity", () => {
 
 describe("web apps", () => {
 	const app = (name: string, path: string): AppInfo => ({ name, path, icon: null, is_running: false });
-	const chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe";
+	const chrome = String.raw`C:\Program Files\Google\Chrome\Application\chrome.exe`;
 	const installed = [
 		app("Google Chrome", "Chrome"),
 		app("Netflix", "Chrome._crx_eppojlglocmnohnlnionkobfln"),
@@ -195,7 +196,7 @@ describe("web apps", () => {
 		expect(pinnableApp(app("Google Chrome", chrome), installed).path).toBe(chrome);
 		expect(pinnableApp(app("YouTube", chrome), installed).path).toBe(chrome);
 		// Other apps are untouched.
-		const spotify = app("Spotify", "C:\Spotify\Spotify.exe");
+		const spotify = app("Spotify", String.raw`C:\Spotify\Spotify.exe`);
 		expect(pinnableApp(spotify, installed)).toBe(spotify);
 	});
 
@@ -207,6 +208,36 @@ describe("web apps", () => {
 		expect(isSameWebApp(pin, app("YouTube", chrome))).toBe(false);
 		expect(isSameWebApp(pin, app("Google Chrome", chrome))).toBe(false);
 		// Two plain apps aren't web apps at all.
-		expect(isSameWebApp(app("Spotify", "C:\Spotify\Spotify.exe"), app("Spotify", "C:\Spotify\Spotify.exe"))).toBe(false);
+		const spotify = String.raw`C:\Spotify\Spotify.exe`;
+		expect(isSameWebApp(app("Spotify", spotify), app("Spotify", spotify))).toBe(false);
+	});
+});
+
+describe("matching pins to running windows by their program", () => {
+	const app = (name: string, path: string, executable?: string): AppInfo => ({
+		name,
+		path,
+		icon: null,
+		is_running: true,
+		executable
+	});
+	const chrome = String.raw`C:\Program Files\Google\Chrome\Application\chrome.exe`;
+	const youtube = app("YouTube", chrome, "chrome.exe");
+
+	test("a web app pin never claims another browser window", () => {
+		const netflix = app("Netflix", "Chrome._crx_eppojlglocmnohnlnionkobfln", "chrome.exe");
+		expect(canMatchByProgram(netflix, youtube)).toBe(false);
+		expect(canMatchByProgram(netflix, app("Netflix", chrome, "chrome.exe"))).toBe(false);
+	});
+
+	test("a browser window only counts with the pin's own name", () => {
+		expect(canMatchByProgram(app("Google Chrome", chrome, "chrome.exe"), youtube)).toBe(false);
+		expect(canMatchByProgram(app("Google Chrome", chrome, "chrome.exe"), app("Google Chrome", chrome, "chrome.exe"))).toBe(true);
+	});
+
+	test("other programs still match by executable", () => {
+		const discord = app("Discord", String.raw`C:\Users\x\AppData\Local\Discord\app-1.0.9262\Discord.exe`, "Discord.exe");
+		const window = app("Discord - #general", String.raw`C:\Users\x\AppData\Local\Discord\app-1.0.9264\Discord.exe`, "Discord.exe");
+		expect(canMatchByProgram(discord, window)).toBe(true);
 	});
 });

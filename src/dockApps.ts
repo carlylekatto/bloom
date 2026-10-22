@@ -91,6 +91,20 @@ export function pinnableApp(app: AppInfo, installed: AppInfo[]): AppInfo {
 }
 
 /**
+ * Whether a pin may stand for a running window found only by its program
+ * (the same executable). A browser runs the browser and every web app
+ * installed from it, all as one program, so a browser window counts only
+ * with the pin's own name: a pin must never claim another web app's window
+ * (a Netflix pin showing as a running YouTube), and a web app pin matches
+ * nothing by its program at all.
+ */
+export function canMatchByProgram(pin: AppInfo, window: AppInfo): boolean {
+	if (isWebAppId(pin.path)) return false;
+	if (!isBrowserProcess(window.executable ?? window.path)) return true;
+	return pin.name.toLowerCase() === window.name.toLowerCase();
+}
+
+/**
  * Whether a web app pinned by its id and a browser window are the same app:
  * a web app's window is its browser's process, titled with the app's name.
  */
