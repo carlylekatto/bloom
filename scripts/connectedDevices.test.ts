@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { groupHubEntries, urgentLevel, type HubEntry } from "../src/devices/batteryHub";
+import { groupDevices, urgentLevel, type DeviceEntry } from "../src/devices/connectedDevices";
 
-const entry = (name: string, kind: string, level: number | null, rest: Partial<HubEntry> = {}): HubEntry => ({
+const entry = (name: string, kind: string, level: number | null, rest: Partial<DeviceEntry> = {}): DeviceEntry => ({
 	id: name,
 	name,
 	kind,
+	wired: false,
 	art: null,
 	level,
 	charging: false,
@@ -12,10 +13,10 @@ const entry = (name: string, kind: string, level: number | null, rest: Partial<H
 	...rest
 });
 
-const titles = (entries: HubEntry[], threshold = 20) =>
-	groupHubEntries(entries, threshold).map((g) => `${g.title}: ${g.entries.map((e) => e.name).join(", ")}`);
+const titles = (entries: DeviceEntry[], threshold = 20) =>
+	groupDevices(entries, threshold).map((g) => `${g.title}: ${g.entries.map((e) => e.name).join(", ")}`);
 
-describe("Battery hub groups", () => {
+describe("Connected devices groups", () => {
 	test("puts low devices first, then groups by type", () => {
 		expect(
 			titles([
@@ -25,6 +26,7 @@ describe("Battery hub groups", () => {
 				entry("MX Anywhere", "mouse", 9),
 				entry("AirPods Pro", "audio", 82),
 				entry("Galaxy Watch6", "wearable", 55),
+				entry("SanDisk Cruzer Blade", "usb", null, { wired: true }),
 				entry("Gadget", "other", null)
 			])
 		).toEqual([
@@ -33,8 +35,19 @@ describe("Battery hub groups", () => {
 			"Audio: AirPods Pro",
 			"Phone & watch: Galaxy Watch6, iPhone",
 			"Accessories: Keyboard",
+			"Drives & cameras: SanDisk Cruzer Blade",
 			"Other: Gadget"
 		]);
+	});
+
+	test("lists wired audio with the wireless, after those with a battery", () => {
+		expect(
+			titles([
+				entry("Wired earphones", "audio", null, { wired: true }),
+				entry("AirPods Pro", "audio", 82),
+				entry("Headphones (AB13X USB Audio)", "audio", null, { wired: true })
+			])
+		).toEqual(["Audio: AirPods Pro, Headphones (AB13X USB Audio), Wired earphones"]);
 	});
 
 	test("judges earbuds by their lowest part that isn't charging", () => {

@@ -159,7 +159,7 @@ export function NotchTab({
 						>
 							<option value="calendar" disabled={!calendarEnabled}>Calendar</option>
 							<option value="command-center">Command Center</option>
-							<option value="battery">Battery hub</option>
+							<option value="devices">Connected devices</option>
 						</select>
 					</SettingRow>
 				)}

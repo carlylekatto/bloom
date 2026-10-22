@@ -430,6 +430,33 @@
 	background: var(--bloom-group-bg, rgba(255, 255, 255, 0.06));
 }
 
+/* Audio rows open their "Looks like" choice */
+.bh-row-button {
+	width: 100%;
+	border: none;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.bh-item {
+	border-radius: 10px;
+}
+
+.bh-item.expanded {
+	background: var(--bloom-group-bg, rgba(255, 255, 255, 0.06));
+}
+
+.bh-item.expanded .bh-row:hover {
+	background: transparent;
+}
+
+.bh-looks {
+	padding: 0 8px 8px 47px;
+}
+
 .bh-art {
 	flex: none;
 	width: 30px;

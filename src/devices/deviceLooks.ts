@@ -14,8 +14,18 @@ export const DEVICE_LOOKS: { art: DeviceArtKey; label: string }[] = [
 	{ art: "speaker", label: "Speaker" }
 ];
 
+/** The same, for wired and USB audio devices, which Windows only knows as an
+ * audio output or microphone. */
+export const WIRED_DEVICE_LOOKS: { art: DeviceArtKey; label: string }[] = [
+	{ art: "headphones-wired", label: "Headphones" },
+	{ art: "earbuds-usbc", label: "Earbuds (USB-C)" },
+	{ art: "earbuds-jack", label: "Earbuds (3.5 mm)" },
+	{ art: "speaker", label: "Speaker" },
+	{ art: "microphone", label: "Microphone" }
+];
+
 const KEY = "bloom-device-looks";
-const PICKABLE = new Set<string>(DEVICE_LOOKS.map((look) => look.art));
+const PICKABLE = new Set<string>([...DEVICE_LOOKS, ...WIRED_DEVICE_LOOKS].map((look) => look.art));
 
 /** The saved picks, by device name, from the setting's JSON. */
 export function parseDeviceLooks(raw: string | null | undefined): Record<string, DeviceArtKey> {

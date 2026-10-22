@@ -46,9 +46,9 @@ import { BluetoothPanel } from "./components/BluetoothPanel";
 import { DeviceArt, DeviceArtDefs } from "./devices/DeviceArt";
 import { deviceArtFor } from "./devices/deviceArtFor";
 import { deviceLookFor } from "./devices/deviceLooks";
-import type { BudLevel, BudsBattery } from "./devices/batteryHub";
-import { BatteryHubPanel } from "./components/BatteryHubPanel";
-import { usbArtFor, usbDisplayName, type UsbIdentity } from "./devices/usbArtFor";
+import type { BudLevel, BudsBattery } from "./devices/connectedDevices";
+import { ConnectedDevicesPanel } from "./components/ConnectedDevicesPanel";
+import { isWiredAudio, usbArtFor, usbDisplayName, type UsbIdentity } from "./devices/usbArtFor";
 import type { DeviceArtKey } from "./devices/art";
 import {
 	Cpu,
@@ -79,8 +79,8 @@ import {
  *   Dragging files onto the notch also opens the shelf. Wheel/swipe switches
  *   between tool panels, including when a live activity occupies the pill.
  */
-type NotchPanel = "calendar" | "command-center" | "battery";
-const NOTCH_PANELS: readonly NotchPanel[] = ["calendar", "command-center", "battery"];
+type NotchPanel = "calendar" | "command-center" | "devices";
+const NOTCH_PANELS: readonly NotchPanel[] = ["calendar", "command-center", "devices"];
 const asNotchPanel = (value: unknown): NotchPanel | null =>
 	NOTCH_PANELS.includes(value as NotchPanel) ? (value as NotchPanel) : null;
 
@@ -463,7 +463,7 @@ type BloomMode =
 	| "shelf"
 	| "wifi"
 	| "bluetooth"
-	| "battery"
+	| "devices"
 	| "device";
 
 // A device that just connected or disconnected, shown briefly in the pill.
@@ -511,9 +511,10 @@ const PLUGGED_ART = new Set<DeviceArtKey>([
 	"webcam",
 	"microphone"
 ]);
-function deviceAlertStatus(art: DeviceArtKey, connected: boolean): string {
+function deviceAlertStatus(art: DeviceArtKey, connected: boolean, wired = false): string {
 	if (art === "sd-card") return connected ? "Inserted" : "Removed";
-	if (PLUGGED_ART.has(art)) return connected ? "Plugged in" : "Unplugged";
+	// A wired device is plugged in whatever it was picked to look like.
+	if (wired || PLUGGED_ART.has(art)) return connected ? "Plugged in" : "Unplugged";
 	return connected ? "Connected" : "Disconnected";
 }
 
@@ -826,7 +827,7 @@ function App() {
 		dismiss: dismissAnnouncement
 	} = useAnnouncement();
 	const [deviceAlert, setDeviceAlert] = useState<DeviceAlert | null>(null);
-	// Each connected earbud's own levels, as last reported, for Battery hub.
+	// Each connected earbud's own levels, as last reported, for Connected devices.
 	const [budsById, setBudsById] = useState<Record<string, BudsBattery>>({});
 	// True from an alert appearing until its exit animation has finished, so
 	// the clock row only comes back once the alert has faded out.
@@ -1703,7 +1704,7 @@ function App() {
 			prev === "shelf" ||
 			prev === "wifi" ||
 			prev === "bluetooth" ||
-			prev === "battery"
+			prev === "devices"
 				? restingModeRef.current
 				: prev
 		);
@@ -2308,20 +2309,26 @@ function App() {
 			setDeviceAlert((alert) => (alert && alert.id === id && alert.connected ? { ...alert, buds } : alert));
 			setBudsById((all) => ({ ...all, [id]: buds }));
 		});
-		const unlistenUsb = listen<UsbConnection>("usb-connection", ({ payload }) => {
+		// USB devices, and what's plugged into the 3.5 mm jack. A wired audio
+		// device's drawing can be picked in Connected devices.
+		const showWired = ({ payload }: { payload: UsbConnection }) => {
+			const name = usbDisplayName(payload);
 			showDeviceAlert({
 				id: payload.id,
-				art: usbArtFor(payload),
-				name: usbDisplayName(payload),
+				art: (isWiredAudio(payload.class) ? deviceLookFor(name) : null) ?? usbArtFor(payload),
+				name,
 				connected: payload.connected,
 				battery: null,
 				usb: true
 			});
-		});
+		};
+		const unlistenUsb = listen<UsbConnection>("usb-connection", showWired);
+		const unlistenJack = listen<UsbConnection>("wired-audio-connection", showWired);
 		return () => {
 			unlistenConnection.then((f) => f());
 			unlistenBattery.then((f) => f());
 			unlistenUsb.then((f) => f());
+			unlistenJack.then((f) => f());
 			unlistenBuds.then((f) => f());
 		};
 	}, [windowLabel, showDeviceAlert]);
@@ -3150,7 +3157,7 @@ function App() {
 		if (isCalendarMode) return 480;
 		if (bloomMode === "shelf") return 380;
 		if (bloomMode === "command-center" && isOpen) return 350;
-		if (bloomMode === "wifi" || bloomMode === "bluetooth" || bloomMode === "battery") return 350;
+		if (bloomMode === "wifi" || bloomMode === "bluetooth" || bloomMode === "devices") return 350;
 		if (showMusicOnStatusHover) {
 			return 170 + (settingsVisualizerEnabled ? 30 : 0);
 		}
@@ -3189,14 +3196,6 @@ function App() {
 			if (shelfItems.length === 0) return 130;
 			return shelfOverflowing ? 190 : 176;
 		}
-		// The per-app mixer is docked below the slider rows and the panel is a
-		// fixed-height column, so the window has to grow with it or the list
-		// overflows. 120 covers the 112px dock plus the 8px flex gap above it.
-		//
-		// Upstream switched this line from `isHovered` to `isOpen` as part of
-		// #192, which makes the command centre open on click rather than hover.
-		// `isOpen` is the state that matches the rest of that rework, so the
-		// mixer offset is folded onto it rather than keeping the old variable.
 		if (bloomMode === "command-center") {
 			// 26px per display is the full cost of adding one, not just the row.
 			// A row is 18px and the list puts an 8px gap between rows, so N rows
@@ -3214,7 +3213,7 @@ function App() {
 					: 0;
 			return (isOpen ? 230 : 36) + (appMixerOpen ? 120 : 0) + monitorRowsPx;
 		}
-		if (bloomMode === "wifi" || bloomMode === "bluetooth" || bloomMode === "battery") return 300;
+		if (bloomMode === "wifi" || bloomMode === "bluetooth" || bloomMode === "devices") return 300;
 		if (bloomMode === "status") return 36;
 		if (isMusicMode && isOpen) {
 			const hasProgressBar = (mediaInfo.duration_ms ?? 0) > 0;
@@ -3995,17 +3994,17 @@ function App() {
 									)}
 								</AnimatePresence>
 
-								{/* Battery hub: every connected device's battery, by priority */}
+								{/* Connected devices: everything connected, with its battery, by priority */}
 								<AnimatePresence>
-									{bloomMode === "battery" && (
+									{bloomMode === "devices" && (
 										<motion.div
-											key="battery-view"
+											key="devices-view"
 											initial={{ opacity: 0 }}
 											animate={{ opacity: 1 }}
 											exit={{ opacity: 0, filter: "blur(4px)", transition: { duration: 0.1 } }}
 											transition={{ type: "spring", stiffness: 400, damping: 30 }}
 										>
-											<BatteryHubPanel buds={budsById} lowThreshold={lowBatteryThreshold} />
+											<ConnectedDevicesPanel buds={budsById} lowThreshold={lowBatteryThreshold} />
 										</motion.div>
 									)}
 								</AnimatePresence>
@@ -4409,7 +4408,7 @@ function App() {
 											<div className="device-alert-text">
 												<span className="device-alert-name">{deviceAlert.name}</span>
 												<span className="device-alert-status">
-													{deviceAlertStatus(deviceAlert.art, deviceAlert.connected)}
+													{deviceAlertStatus(deviceAlert.art, deviceAlert.connected, deviceAlert.usb)}
 												</span>
 											</div>
 											{deviceAlert.connected && deviceAlert.buds ? (

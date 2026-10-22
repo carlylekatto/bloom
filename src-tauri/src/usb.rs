@@ -75,6 +75,31 @@ fn pick(raw: Vec<UsbConnection>) -> Vec<UsbConnection> {
 static APP: OnceLock<AppHandle> = OnceLock::new();
 /// Keeps the watchers alive for the app's lifetime.
 static WATCHERS: Mutex<Vec<DeviceWatcher>> = Mutex::new(Vec::new());
+/// Each watcher's state, for listing what's plugged in now.
+static WATCHES: Mutex<Vec<Arc<Watch>>> = Mutex::new(Vec::new());
+
+/// The USB devices plugged in now, one per device as its most telling
+/// interface, like the `usb-connection` events. Includes devices that were
+/// already plugged in at startup.
+#[tauri::command]
+pub fn usb_list_devices() -> Vec<UsbConnection> {
+    let Ok(watches) = WATCHES.lock() else {
+        return Vec::new();
+    };
+    let present = watches
+        .iter()
+        .flat_map(|watch| {
+            let known = watch.known.lock().map(|k| k.clone()).unwrap_or_default();
+            known.into_values().map(|(id, name)| UsbConnection {
+                id,
+                name,
+                class: watch.class,
+                connected: true,
+            })
+        })
+        .collect();
+    pick(present)
+}
 
 fn props(keys: &[&str]) -> IIterable<HSTRING> {
     keys.iter()
@@ -273,6 +298,9 @@ pub fn setup_usb_notifications(app: AppHandle) {
                 usb_containers: usb_containers.clone(),
                 tx: Mutex::new(tx.clone()),
             });
+            if let Ok(mut watches) = WATCHES.lock() {
+                watches.push(state.clone());
+            }
             if let Ok(watcher) = watch(&aqs, state) {
                 watchers.push(watcher);
             }

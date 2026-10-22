@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { usbArtFor, usbDisplayName } from "../src/devices/usbArtFor";
+import { isWiredAudio, usbArtFor, usbDisplayName } from "../src/devices/usbArtFor";
 
 describe("USB device art", () => {
 	test("tells drives apart by name", () => {
@@ -15,6 +15,15 @@ describe("USB device art", () => {
 		expect(usbArtFor({ class: "audio-in", name: "Yeti Stereo Microphone" })).toBe("microphone");
 		expect(usbArtFor({ class: "audio-out", name: "EarPods (USB-C) earphones" })).toBe("earbuds-usbc");
 		expect(usbArtFor({ class: "audio-out", name: "USB-C to 3.5mm Headphone Jack Adapter" })).toBe("headphones-wired");
+	});
+
+	test("maps what's plugged into the 3.5 mm jack", () => {
+		expect(usbArtFor({ class: "jack-headset", name: "Wired earphones" })).toBe("earbuds-jack");
+		expect(usbArtFor({ class: "jack-headphones", name: "Wired headphones" })).toBe("headphones-wired");
+		expect(isWiredAudio("jack-headset")).toBe(true);
+		expect(isWiredAudio("audio-out")).toBe(true);
+		expect(isWiredAudio("disk")).toBe(false);
+		expect(isWiredAudio("camera")).toBe(false);
 	});
 
 	test("cleans up Windows' names", () => {

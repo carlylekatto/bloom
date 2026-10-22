@@ -21,10 +21,10 @@ function readBool(val: string | null): boolean {
 }
 
 /** The notch panels a click can open. */
-export type NotchPanelChoice = "calendar" | "command-center" | "battery";
+export type NotchPanelChoice = "calendar" | "command-center" | "devices";
 
 function asPanelChoice(val: unknown): NotchPanelChoice {
-	return val === "command-center" || val === "battery" ? val : "calendar";
+	return val === "command-center" || val === "devices" ? val : "calendar";
 }
 
 export function useSettings() {

@@ -12,12 +12,17 @@ export interface BudsBattery {
 	case: BudLevel | null;
 }
 
-/** One row in Battery hub. */
-export interface HubEntry {
+/** One row in Connected devices. */
+export interface DeviceEntry {
 	id: string;
 	name: string;
-	/** "pc", or a Bluetooth kind: "audio", "phone", "wearable", "mouse", ... */
+	/**
+	 * "pc"; a Bluetooth kind ("audio", "phone", "wearable", "mouse", ...);
+	 * "audio" for wired and USB audio; "usb" for USB drives and cameras.
+	 */
 	kind: string;
+	/** Plugged in by cable (USB or the 3.5 mm jack) rather than Bluetooth. */
+	wired: boolean;
 	art: DeviceArtKey | null;
 	/** Percent, when known. */
 	level: number | null;
@@ -26,24 +31,25 @@ export interface HubEntry {
 	buds: BudsBattery | null;
 }
 
-export type HubGroupKey = "low" | "pc" | "audio" | "phone" | "accessories" | "other";
+export type DeviceGroupKey = "low" | "pc" | "audio" | "phone" | "accessories" | "usb" | "other";
 
-export interface HubGroup {
-	key: HubGroupKey;
+export interface DeviceGroup {
+	key: DeviceGroupKey;
 	title: string;
-	entries: HubEntry[];
+	entries: DeviceEntry[];
 }
 
-const GROUPS: { key: HubGroupKey; title: string }[] = [
+const GROUPS: { key: DeviceGroupKey; title: string }[] = [
 	{ key: "low", title: "Needs charging" },
 	{ key: "pc", title: "This PC" },
 	{ key: "audio", title: "Audio" },
 	{ key: "phone", title: "Phone & watch" },
 	{ key: "accessories", title: "Accessories" },
+	{ key: "usb", title: "Drives & cameras" },
 	{ key: "other", title: "Other" }
 ];
 
-function typeGroup(kind: string): HubGroupKey {
+function typeGroup(kind: string): DeviceGroupKey {
 	switch (kind) {
 		case "pc":
 			return "pc";
@@ -56,6 +62,8 @@ function typeGroup(kind: string): HubGroupKey {
 		case "keyboard":
 		case "gamepad":
 			return "accessories";
+		case "usb":
+			return "usb";
 		default:
 			return "other";
 	}
@@ -70,7 +78,7 @@ function budParts(buds: BudsBattery): BudLevel[] {
  * charging (a flat bud needs charging even if the other is full), or null
  * when nothing is known or everything is charging.
  */
-export function urgentLevel(entry: HubEntry): number | null {
+export function urgentLevel(entry: DeviceEntry): number | null {
 	const parts = entry.buds
 		? budParts(entry.buds)
 		: entry.level !== null
@@ -81,16 +89,16 @@ export function urgentLevel(entry: HubEntry): number | null {
 }
 
 /** The level a device sorts by: its lowest known part. */
-function sortLevel(entry: HubEntry): number | null {
+function sortLevel(entry: DeviceEntry): number | null {
 	const levels = entry.buds ? budParts(entry.buds).map((p) => p.level) : entry.level !== null ? [entry.level] : [];
 	return levels.length > 0 ? Math.min(...levels) : null;
 }
 
-function byUrgency(a: HubEntry, b: HubEntry): number {
+function byUrgency(a: DeviceEntry, b: DeviceEntry): number {
 	const la = sortLevel(a);
 	const lb = sortLevel(b);
 	if (la !== lb) {
-		// Devices without a level go last.
+		// Devices without a level (wired ones, and some Bluetooth) go last.
 		if (la === null) return 1;
 		if (lb === null) return -1;
 		return la - lb;
@@ -99,13 +107,13 @@ function byUrgency(a: HubEntry, b: HubEntry): number {
 }
 
 /**
- * Battery hub's groups, by priority: everything at or below `threshold` that
- * isn't charging, then the PC, audio, phones and watches, accessories and the
- * rest. The lowest battery comes first in each group; empty groups are left
- * out.
+ * Connected devices' groups, by priority: everything at or below `threshold`
+ * that isn't charging, then the PC, audio (wireless and wired), phones and
+ * watches, accessories, USB drives and cameras, and the rest. The lowest
+ * battery comes first in each group; empty groups are left out.
  */
-export function groupHubEntries(entries: HubEntry[], threshold: number): HubGroup[] {
-	const buckets = new Map<HubGroupKey, HubEntry[]>();
+export function groupDevices(entries: DeviceEntry[], threshold: number): DeviceGroup[] {
+	const buckets = new Map<DeviceGroupKey, DeviceEntry[]>();
 	for (const entry of entries) {
 		const urgent = urgentLevel(entry);
 		const key = urgent !== null && urgent <= threshold ? "low" : typeGroup(entry.kind);

@@ -9,6 +9,13 @@ describe("device looks setting", () => {
 		});
 	});
 
+	test("keeps picks for wired devices", () => {
+		expect(parseDeviceLooks('{"Wired earphones":"earbuds-jack","USB audio":"headphones-wired"}')).toEqual({
+			"Wired earphones": "earbuds-jack",
+			"USB audio": "headphones-wired"
+		});
+	});
+
 	test("ignores drawings that can't be picked and bad JSON", () => {
 		expect(parseDeviceLooks('{"A":"phone","B":"neckband","C":3}')).toEqual({ B: "neckband" });
 		expect(parseDeviceLooks("not json")).toEqual({});
