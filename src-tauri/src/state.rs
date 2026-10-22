@@ -48,6 +48,9 @@ pub static LAST_START_TOGGLE_MS: AtomicI64 = AtomicI64::new(0);
 // recorded by the mouse hook before Start can react to the press.
 pub static START_OPEN_AT_PRESS: AtomicBool = AtomicBool::new(false);
 pub static OVERLAY_IN_SPLASH: AtomicBool = AtomicBool::new(false);
+/// A volume or brightness HUD card is up in the overlay. Only then are its
+/// edge rects hit-testable; the rest of the time the overlay stays click-through.
+pub static OVERLAY_HUD_UP: AtomicBool = AtomicBool::new(false);
 pub static CURRENT_FOREGROUND_FULLSCREEN: AtomicBool = AtomicBool::new(false);
 pub static CURRENT_FOREGROUND_MAXIMIZED: AtomicBool = AtomicBool::new(false);
 
