@@ -337,7 +337,8 @@ export function DockTab({
 						</SettingRow>
 
 						{dockExtrasPosition !== "off" && (
-							<>
+							<details className="settings-disclosure">
+								<summary>Manage dock extras <span>Drives, folders and Recycle Bin</span></summary>
 								<SettingRow
 									icon={HardDrive}
 									label="Drives"
@@ -468,7 +469,7 @@ export function DockTab({
 										</button>
 									</div>
 								</div>
-							</>
+							</details>
 						)}
 
 						<div className="setting-divider" />
