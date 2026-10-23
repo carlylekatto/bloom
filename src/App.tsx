@@ -1112,6 +1112,14 @@ function App() {
 	const [settingsCalendarEnabled, setSettingsCalendarEnabled] = useState(
 		() => localStorage.getItem("bloom-calendar-enabled") !== "false"
 	);
+	// Which panels the notch shows. Calendar and Controls are on by default;
+	// Connected devices (and panels added later) are opt-in.
+	const [settingsControlsPanelEnabled, setSettingsControlsPanelEnabled] = useState(
+		() => localStorage.getItem("bloom-notch-command-center-enabled") !== "false"
+	);
+	const [settingsDevicesPanelEnabled, setSettingsDevicesPanelEnabled] = useState(
+		() => localStorage.getItem("bloom-notch-devices-enabled") === "true"
+	);
 	const [settingsTimerSoundEnabled, setSettingsTimerSoundEnabled] = useState(
 		() => localStorage.getItem("bloom-timer-sound-enabled") !== "false"
 	);
@@ -1185,6 +1193,10 @@ function App() {
 
 				setSettingsWeatherEnabled(getVal("bloom-weather-enabled", "true") !== "false");
 				setSettingsCalendarEnabled(getVal("bloom-calendar-enabled", "true") !== "false");
+				setSettingsControlsPanelEnabled(
+					getVal("bloom-notch-command-center-enabled", "true") !== "false"
+				);
+				setSettingsDevicesPanelEnabled(getVal("bloom-notch-devices-enabled", "false") === "true");
 				setSettingsTimerSoundEnabled(getVal("bloom-timer-sound-enabled", "true") !== "false");
 				setSettingsMusicModeEnabled(getVal("bloom-music-mode-enabled", "true") !== "false");
 				setRememberPanelEnabled(
@@ -1310,6 +1322,8 @@ function App() {
 		{
 			"bloom-weather-enabled": setSettingsWeatherEnabled,
 			"bloom-calendar-enabled": setSettingsCalendarEnabled,
+			"bloom-notch-command-center-enabled": setSettingsControlsPanelEnabled,
+			"bloom-notch-devices-enabled": setSettingsDevicesPanelEnabled,
 			"bloom-timer-sound-enabled": setSettingsTimerSoundEnabled,
 			"bloom-music-mode-enabled": setSettingsMusicModeEnabled,
 			"bloom-notch-remember-panel": setRememberPanelEnabled,
@@ -1956,9 +1970,17 @@ function App() {
 		if (cycleBloomMode(delta > 0 ? 1 : -1)) lastScrollTime.current = now;
 	};
 
-	function panelAvailable(panel: NotchPanel) {
+	function panelEnabled(panel: NotchPanel) {
 		if (panel === "calendar") return settingsCalendarEnabled;
-		return true;
+		if (panel === "command-center") return settingsControlsPanelEnabled;
+		return settingsDevicesPanelEnabled;
+	}
+
+	// Settings keeps at least one panel on; if a hand-edited settings file turns
+	// them all off, Controls stays so the open notch is never empty.
+	function panelAvailable(panel: NotchPanel) {
+		if (!NOTCH_PANELS.some(panelEnabled)) return panel === "command-center";
+		return panelEnabled(panel);
 	}
 
 	// Wheel and swipe navigate panels, even from a collapsed live activity.
@@ -2174,10 +2196,11 @@ function App() {
 	bloomModeRef.current = bloomMode;
 
 	// A click opens the last-used panel when memory is enabled, otherwise the
-	// selected default. The controls panel is always available as a fallback.
+	// selected default. If that panel is turned off, the first one that's on.
 	const openingPanel = (): NotchPanel => {
 		const preferred = rememberPanelEnabled ? lastPanel ?? defaultPanel : defaultPanel;
-		return panelAvailable(preferred) ? preferred : "command-center";
+		if (panelAvailable(preferred)) return preferred;
+		return NOTCH_PANELS.find(panelAvailable) ?? "command-center";
 	};
 
 	// Expands the notch into a panel, or into an activity's own view.
@@ -2222,12 +2245,19 @@ function App() {
 		lastPlayingRef.current = isPlaying;
 	}, [isPlaying, mediaInfo.title, notchMode, triggerEventPeek]);
 
-	// Reset bloom mode when calendar setting is disabled
+	// Leave a panel that has just been turned off in Settings.
 	useEffect(() => {
-		if (!settingsCalendarEnabled && bloomMode === "calendar") {
+		const panel = asNotchPanel(bloomMode);
+		if (panel && !panelAvailable(panel)) {
 			setBloomMode(isOpen ? openingPanel() : collapsedMode);
 		}
-	}, [settingsCalendarEnabled, bloomMode, isOpen]);
+	}, [
+		settingsCalendarEnabled,
+		settingsControlsPanelEnabled,
+		settingsDevicesPanelEnabled,
+		bloomMode,
+		isOpen
+	]);
 
 	// Leave the music view when music is turned off or the player ends its media
 	// session: an open notch falls back to the remembered panel.

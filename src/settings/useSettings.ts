@@ -39,6 +39,8 @@ export function useSettings() {
 	const [autostart, setAutostart] = useState(false);
 	const [weatherEnabled, setWeatherEnabled] = useState(true);
 	const [calendarEnabled, setCalendarEnabled] = useState(true);
+	const [controlsPanelEnabled, setControlsPanelEnabled] = useState(true);
+	const [devicesPanelEnabled, setDevicesPanelEnabled] = useState(false);
 	const [timerSoundEnabled, setTimerSoundEnabled] = useState(
 		() => localStorage.getItem("bloom-timer-sound-enabled") !== "false"
 	);
@@ -212,6 +214,8 @@ export function useSettings() {
 
 			apply(getVal("bloom-weather-enabled"), setWeatherEnabled, readBool);
 			apply(getVal("bloom-calendar-enabled"), setCalendarEnabled, readBool);
+			apply(getVal("bloom-notch-command-center-enabled"), setControlsPanelEnabled, readBool);
+			apply(getVal("bloom-notch-devices-enabled"), setDevicesPanelEnabled, readBool);
 			apply(getVal("bloom-timer-sound-enabled"), setTimerSoundEnabled, readBool);
 			apply(getVal("bloom-music-mode-enabled"), setMusicModeEnabled, readBool);
 			apply(getVal("bloom-notch-remember-panel") ?? getVal("bloom-notch-click-to-open"),
@@ -388,6 +392,8 @@ export function useSettings() {
 		"bloom-dock-extras-custom-folders": setDockExtrasCustomFolders,
 		"bloom-weather-enabled": setWeatherEnabled,
 		"bloom-calendar-enabled": setCalendarEnabled,
+		"bloom-notch-command-center-enabled": setControlsPanelEnabled,
+		"bloom-notch-devices-enabled": setDevicesPanelEnabled,
 		"bloom-timer-sound-enabled": setTimerSoundEnabled,
 		"bloom-music-mode-enabled": setMusicModeEnabled,
 		"bloom-notch-remember-panel": setNotchRememberPanel,
@@ -544,10 +550,29 @@ export function useSettings() {
 		saveSetting("bloom-weather-enabled", String(next));
 	};
 
+	// The notch needs at least one panel, so the last one on can't be turned off.
+	const enabledPanelCount =
+		Number(calendarEnabled) + Number(controlsPanelEnabled) + Number(devicesPanelEnabled);
+
 	const toggleCalendar = () => {
 		const next = !calendarEnabled;
+		if (!next && enabledPanelCount <= 1) return;
 		setCalendarEnabled(next);
 		saveSetting("bloom-calendar-enabled", String(next));
+	};
+
+	const toggleControlsPanel = () => {
+		const next = !controlsPanelEnabled;
+		if (!next && enabledPanelCount <= 1) return;
+		setControlsPanelEnabled(next);
+		saveSetting("bloom-notch-command-center-enabled", String(next));
+	};
+
+	const toggleDevicesPanel = () => {
+		const next = !devicesPanelEnabled;
+		if (!next && enabledPanelCount <= 1) return;
+		setDevicesPanelEnabled(next);
+		saveSetting("bloom-notch-devices-enabled", String(next));
 	};
 
 	const toggleTimerSound = () => {
@@ -985,6 +1010,11 @@ export function useSettings() {
 		handleNotchEdgeDelayChange,
 		calendarEnabled,
 		toggleCalendar,
+		controlsPanelEnabled,
+		toggleControlsPanel,
+		devicesPanelEnabled,
+		toggleDevicesPanel,
+		enabledPanelCount,
 		timerSoundEnabled,
 		toggleTimerSound,
 		musicModeEnabled,
