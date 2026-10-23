@@ -84,6 +84,11 @@ const NOTCH_PANELS: readonly NotchPanel[] = ["calendar", "command-center", "devi
 const asNotchPanel = (value: unknown): NotchPanel | null =>
 	NOTCH_PANELS.includes(value as NotchPanel) ? (value as NotchPanel) : null;
 
+// The Connected devices panel grows with its list between these heights;
+// the maximum is the size the panel had before it grew to fit.
+const DEVICES_MIN_HEIGHT = 150;
+const DEVICES_MAX_HEIGHT = 300;
+
 // Pomodoro timer limit.
 const MAX_TIMER_SECONDS = 180 * 60;
 
@@ -829,6 +834,9 @@ function App() {
 	const [deviceAlert, setDeviceAlert] = useState<DeviceAlert | null>(null);
 	// Each connected earbud's own levels, as last reported, for Connected devices.
 	const [budsById, setBudsById] = useState<Record<string, BudsBattery>>({});
+	// The height the Connected devices panel's content needs; the open notch
+	// follows it up to DEVICES_MAX_HEIGHT, past which the list scrolls.
+	const [devicesContentHeight, setDevicesContentHeight] = useState(DEVICES_MAX_HEIGHT);
 	// True from an alert appearing until its exit animation has finished, so
 	// the clock row only comes back once the alert has faded out.
 	const [deviceAlertOnScreen, setDeviceAlertOnScreen] = useState(false);
@@ -3243,7 +3251,10 @@ function App() {
 					: 0;
 			return (isOpen ? 230 : 36) + (appMixerOpen ? 120 : 0) + monitorRowsPx;
 		}
-		if (bloomMode === "wifi" || bloomMode === "bluetooth" || bloomMode === "devices") return 300;
+		if (bloomMode === "devices") {
+			return Math.min(DEVICES_MAX_HEIGHT, Math.max(DEVICES_MIN_HEIGHT, devicesContentHeight));
+		}
+		if (bloomMode === "wifi" || bloomMode === "bluetooth") return 300;
 		if (bloomMode === "status") return 36;
 		if (isMusicMode && isOpen) {
 			const hasProgressBar = (mediaInfo.duration_ms ?? 0) > 0;
@@ -4034,7 +4045,11 @@ function App() {
 											exit={{ opacity: 0, filter: "blur(4px)", transition: { duration: 0.1 } }}
 											transition={{ type: "spring", stiffness: 400, damping: 30 }}
 										>
-											<ConnectedDevicesPanel buds={budsById} lowThreshold={lowBatteryThreshold} />
+											<ConnectedDevicesPanel
+												buds={budsById}
+												lowThreshold={lowBatteryThreshold}
+												onContentHeight={setDevicesContentHeight}
+											/>
 										</motion.div>
 									)}
 								</AnimatePresence>

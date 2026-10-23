@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Laptop, LoaderCircle, MonitorSmartphone, Zap } from "lucide-react";
@@ -37,7 +37,15 @@ interface ConnectedDevicesPanelProps {
 	buds: Record<string, BudsBattery>;
 	/** The user's low battery threshold, in percent. */
 	lowThreshold: number;
+	/**
+	 * Called with the notch height the panel's content needs, so the notch can
+	 * grow with the list (up to its limit) instead of keeping a fixed size.
+	 */
+	onContentHeight?: (height: number) => void;
 }
+
+/** Room for the loading spinner or the empty message. */
+const EMPTY_BODY_HEIGHT = 72;
 
 function duration(seconds: number): string {
 	const minutes = Math.round(seconds / 60);
@@ -76,7 +84,11 @@ function Meter({ label, part, low }: { label?: string; part: BudLevel; low: bool
  * choice, the drawing its connection popup uses, which wired devices have no
  * other place to set.
  */
-export function ConnectedDevicesPanel({ buds, lowThreshold }: ConnectedDevicesPanelProps) {
+export function ConnectedDevicesPanel({ buds, lowThreshold, onContentHeight }: ConnectedDevicesPanelProps) {
+	const panelRef = useRef<HTMLDivElement>(null);
+	const headerRef = useRef<HTMLDivElement>(null);
+	const listRef = useRef<HTMLDivElement>(null);
+	const reportedHeight = useRef(0);
 	const [devices, setDevices] = useState<BtDevice[] | null>(null);
 	const [wired, setWired] = useState<WiredDevice[]>([]);
 	const [pc, setPc] = useState<PcBattery | null>(null);
@@ -244,9 +256,42 @@ export function ConnectedDevicesPanel({ buds, lowThreshold }: ConnectedDevicesPa
 	const loading = devices === null;
 	const empty = !loading && groups.length === 0;
 
+	// The height the notch needs to show everything: the panel's offset and
+	// padding, the header, the gap, and the list's full (unclipped) height.
+	const measureContent = useCallback(() => {
+		const panel = panelRef.current;
+		if (!panel || !onContentHeight) return;
+		const style = getComputedStyle(panel);
+		const body = listRef.current ? listRef.current.scrollHeight : EMPTY_BODY_HEIGHT;
+		const height = Math.ceil(
+			panel.offsetTop +
+				parseFloat(style.paddingTop) +
+				(headerRef.current?.offsetHeight ?? 0) +
+				(parseFloat(style.rowGap) || 0) +
+				body +
+				parseFloat(style.paddingBottom)
+		);
+		if (height === reportedHeight.current) return;
+		reportedHeight.current = height;
+		onContentHeight(height);
+	}, [onContentHeight]);
+
+	useLayoutEffect(measureContent);
+
+	// Rows also change size on their own (a row's "Looks like" choice opening),
+	// so watch the list and each group as well as re-measuring on render.
+	useEffect(() => {
+		const list = listRef.current;
+		if (!list) return;
+		const observer = new ResizeObserver(measureContent);
+		observer.observe(list);
+		for (const group of Array.from(list.children)) observer.observe(group);
+		return () => observer.disconnect();
+	});
+
 	return (
-		<div className="qp bh" onClick={(e) => e.stopPropagation()}>
-			<div className="qp-header">
+		<div ref={panelRef} className="qp bh" onClick={(e) => e.stopPropagation()}>
+			<div ref={headerRef} className="qp-header">
 				<span className="qp-row-icon bh-title-icon">
 					<MonitorSmartphone />
 				</span>
@@ -262,7 +307,7 @@ export function ConnectedDevicesPanel({ buds, lowThreshold }: ConnectedDevicesPa
 						<span>No devices connected</span>
 					</div>
 				) : (
-					<div className="qp-list bh-list">
+					<div ref={listRef} className="qp-list bh-list">
 						{groups.map((group) => (
 							<section key={group.key} className={`bh-group ${group.key}`}>
 								<h3 className="bh-group-title">{group.title}</h3>
