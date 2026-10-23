@@ -758,7 +758,9 @@ unsafe fn visible_windows() -> Vec<HWND> {
 // SDL and Qt tray menus. The caller also requires a newly visible window
 // from the app's process family, so ordinary captioned clients stay put.
 fn is_tray_menu_window(class: &str, style: u32) -> bool {
-    class == "#32768" || (style & WS_POPUP.0 != 0 && style & WS_CAPTION.0 == 0)
+    // WS_CAPTION combines WS_BORDER and WS_DLGFRAME; a menu can have a
+    // border alone without having a title bar.
+    class == "#32768" || (style & WS_POPUP.0 != 0 && style & WS_CAPTION.0 != WS_CAPTION.0)
 }
 
 fn is_same_app_family(process_path: &str, app_path: &str) -> bool {
@@ -1026,6 +1028,10 @@ mod tests {
         assert!(is_tray_menu_window(
             "WindowsForms10.Window.8.app",
             WS_POPUP.0
+        ));
+        assert!(is_tray_menu_window(
+            "WindowsForms10.Window.8.app",
+            WS_POPUP.0 | WS_BORDER.0
         ));
         assert!(is_tray_menu_window(
             "Qt6QWindowPopupDropShadowSaveBits",
