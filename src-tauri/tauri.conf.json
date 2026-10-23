@@ -1,3 +1,4 @@
+{
 	"$schema": "https://schema.tauri.app/config/2",
 	"productName": "bloom",
 	"version": "3.10.0-7",
@@ -102,7 +103,7 @@
 		"createUpdaterArtifacts": false,
 		"targets": "all",
 		"publisher": "carlylekatto",
-		"copyright": "Copyright Â© 2026 carlylekatto",
+		"copyright": "Copyright © 2026 carlylekatto",
 		"category": "Utility",
 		"shortDescription": "A notch and dock for Windows",
 		"longDescription": "Bloom replaces the Windows taskbar with a dock and adds a notch for media, quick controls and status.",
@@ -124,3 +125,4 @@
 			"pubkey": ""
 		}
 	}
+}

@@ -467,7 +467,7 @@ export function FeaturePreview({ tab, settings, focus }: FeaturePreviewProps) {
 	const choices = FEATURES[tab];
 	const [feature, setFeature] = useState<Feature>("clock");
 	const [replay, setReplay] = useState(0);
-	const [expanded, setExpanded] = useState(true);
+	const [expanded, setExpanded] = useState(false);
 	const [revealed, setRevealed] = useState(false);
 	const previousWidgets = useRef(settings.statusWidgets);
 
