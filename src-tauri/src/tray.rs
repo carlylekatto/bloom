@@ -754,10 +754,11 @@ unsafe fn visible_windows() -> Vec<HWND> {
     windows
 }
 
-// Restrict custom popups to the measured Steam menu shape, so an ordinary
-// app window appearing at the same time is never mistaken for a tray menu.
-fn is_tray_menu_window(class: &str, title: &str) -> bool {
-    class == "#32768" || (class == "SDL_app" && title == "Menu")
+// Standard menus and captionless popup windows cover native, WinForms,
+// SDL and Qt tray menus. The caller also requires a newly visible window
+// from the app's process family, so ordinary captioned clients stay put.
+fn is_tray_menu_window(class: &str, style: u32) -> bool {
+    class == "#32768" || (style & WS_POPUP.0 != 0 && style & WS_CAPTION.0 == 0)
 }
 
 fn is_same_app_family(process_path: &str, app_path: &str) -> bool {
@@ -815,12 +816,7 @@ unsafe fn move_new_menu_to(app_path: &str, before: &[HWND], anchor: POINT) -> Op
             let len =
                 windows::Win32::UI::WindowsAndMessaging::GetClassNameA(*hwnd, &mut class_name);
             let class = std::str::from_utf8(&class_name[..len as usize]).unwrap_or("");
-            let mut title = [0u16; 64];
-            let title_len = GetWindowTextW(*hwnd, &mut title);
-            if !is_tray_menu_window(
-                class,
-                &String::from_utf16_lossy(&title[..title_len as usize]),
-            ) {
+            if !is_tray_menu_window(class, GetWindowLongW(*hwnd, GWL_STYLE) as u32) {
                 return false;
             }
             let mut pid = 0u32;
@@ -1025,10 +1021,22 @@ mod tests {
     use super::*;
     #[test]
     fn custom_tray_menu_detection_excludes_normal_client_windows() {
-        assert!(is_tray_menu_window("#32768", ""));
-        assert!(is_tray_menu_window("SDL_app", "Menu"));
-        assert!(!is_tray_menu_window("SDL_app", "Steam"));
-        assert!(!is_tray_menu_window("OtherApp", "Menu"));
+        assert!(is_tray_menu_window("#32768", 0));
+        assert!(is_tray_menu_window("SDL_app", WS_POPUP.0));
+        assert!(is_tray_menu_window(
+            "WindowsForms10.Window.8.app",
+            WS_POPUP.0
+        ));
+        assert!(is_tray_menu_window(
+            "Qt6QWindowPopupDropShadowSaveBits",
+            WS_POPUP.0
+        ));
+        assert!(!is_tray_menu_window("SDL_app", WS_POPUP.0 | WS_CAPTION.0));
+        assert!(!is_tray_menu_window(
+            "WindowsForms10.Window.8.app",
+            WS_OVERLAPPEDWINDOW.0
+        ));
+        assert!(!is_tray_menu_window("OtherApp", 0));
     }
 
     #[test]

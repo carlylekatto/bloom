@@ -1,6 +1,6 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import {
-	createTrayLaunchFallback,
+	matchesPackagedExecutable,
 	mergeTrayApps,
 	selectDockTrayApps,
 	type AppInfo,
@@ -111,76 +111,50 @@ describe("dock tray lifecycle", () => {
 	});
 });
 
-describe("pinned tray launch fallback", () => {
-	const app: AppInfo = { ...windowApp, is_pinned: true, is_background: true };
-	test("coalesces repeated clicks and launches once if tray activation produced no window", async () => {
-		const launched = Promise.withResolvers<void>();
-		const launch = mock(async () => {
-			launched.resolve();
-		});
-		const fallback = createTrayLaunchFallback(
-			{ hasWindow: async () => false, launch, onError: () => {} },
-			0
-		);
-		for (let i = 0; i < 5; i++) fallback.schedule(app);
-		await launched.promise;
-		expect(launch).toHaveBeenCalledTimes(1);
-		fallback.dispose();
+describe("packaged executable identity", () => {
+	const pin = { name: "Snipping Tool", path: "Microsoft.ScreenSketch_8wekyb3d8bbwe!App" };
+	const executable = {
+		name: "Snipping Tool",
+		path: String.raw`C:\Program Files\WindowsApps\Microsoft.ScreenSketch_11.2.3.0_x64__8wekyb3d8bbwe\SnippingTool.exe`
+	};
+	test("matches a package executable to its shell identity in either direction", () => {
+		expect(matchesPackagedExecutable(pin, executable)).toBe(true);
+		expect(matchesPackagedExecutable(executable, pin)).toBe(true);
 	});
-	test("leaves apps that opened a window through their tray icon alone", async () => {
-		const checked = Promise.withResolvers<void>();
-		const launch = mock(async () => {});
-		const fallback = createTrayLaunchFallback(
-			{
-				hasWindow: async () => {
-					checked.resolve();
-					return true;
-				},
-				launch,
-				onError: () => {}
-			},
-			0
+	test("keeps distinct apps and publishers separate", () => {
+		expect(matchesPackagedExecutable(pin, { ...executable, name: "Other app" })).toBe(false);
+		expect(
+			matchesPackagedExecutable(pin, {
+				...executable,
+				path: executable.path.replace("8wekyb3d8bbwe", "otherpublisher")
+			})
+		).toBe(false);
+		expect(
+			matchesPackagedExecutable(pin, { ...pin, path: pin.path.replace("!App", "!Other") })
+		).toBe(false);
+		expect(
+			matchesPackagedExecutable(pin, {
+				...executable,
+				path: executable.path.replace("WindowsApps", "OtherFolder")
+			})
+		).toBe(false);
+		expect(matchesPackagedExecutable({ ...pin, name: "" }, { ...executable, name: "" })).toBe(
+			false
 		);
-		fallback.schedule(app);
-		await checked.promise;
-		await Promise.resolve();
-		expect(launch).not.toHaveBeenCalled();
-		fallback.dispose();
 	});
-	test("does not relaunch unpinned items and cancels scheduled work on teardown", async () => {
-		const hasWindow = mock(async () => false);
-		const fallback = createTrayLaunchFallback(
-			{ hasWindow, launch: async () => {}, onError: () => {} },
-			0
-		);
-		fallback.schedule({ ...app, is_pinned: false });
-		await Bun.sleep(10);
-		expect(hasWindow).not.toHaveBeenCalled();
-		fallback.schedule(app);
-		fallback.dispose();
-		await Bun.sleep(10);
-		expect(hasWindow).not.toHaveBeenCalled();
-	});
-	test("does not launch when the dock is disposed during a window check", async () => {
-		const started = Promise.withResolvers<void>();
-		const result = Promise.withResolvers<boolean>();
-		const launch = mock(async () => {});
-		const fallback = createTrayLaunchFallback(
-			{
-				hasWindow: () => {
-					started.resolve();
-					return result.promise;
-				},
-				launch,
-				onError: () => {}
-			},
-			0
-		);
-		fallback.schedule(app);
-		await started.promise;
-		fallback.dispose();
-		result.resolve(false);
-		await Promise.resolve();
-		expect(launch).not.toHaveBeenCalled();
+	test("merges a packaged window and executable tray without a second dock item", () => {
+		const window = {
+			...windowApp,
+			...pin,
+			hwnd: 55,
+			all_hwnds: [[55, pin.name]] as [number, string][]
+		};
+		const icon = { ...tray, ...executable, window_handles: [] };
+		const selected = selectDockTrayApps([window], [icon], new Set(), () => false);
+		expect(selected.visible).toEqual([icon]);
+		expect(mergeTrayApps([window], [icon])).toMatchObject([
+			{ path: pin.path, tray_ids: icon.tray_ids }
+		]);
+		expect(mergeTrayApps([window], [icon])).toHaveLength(1);
 	});
 });

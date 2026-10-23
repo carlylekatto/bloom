@@ -29,42 +29,31 @@ export function backgroundTrayId(app: AppInfo): string {
 	return app.tray_ids[0];
 }
 
-// Steam ignores a single tray activation. For a pinned background item only,
-// launch its saved target if no window appeared after the tray click. Coalesce
-// repeated clicks and cancel both timers and in-flight checks on dock teardown.
-export function createTrayLaunchFallback(
-	actions: {
-		hasWindow: (app: AppInfo) => Promise<boolean>;
-		launch: (app: AppInfo) => Promise<void>;
-		onError: (app: AppInfo, error: unknown) => void;
-	},
-	delayMs = 1500
-) {
-	const pending = new Map<string, ReturnType<typeof setTimeout>>();
-	let disposed = false;
-	return {
-		schedule(app: AppInfo) {
-			if (disposed || !app.is_pinned || !app.is_background) return;
-			const key = app.path.toLowerCase().replace(/\\/g, "/");
-			if (pending.has(key)) return;
-			const timer = setTimeout(async () => {
-				try {
-					const hasWindow = await actions.hasWindow(app);
-					if (!disposed && !hasWindow) await actions.launch(app);
-				} catch (error) {
-					if (!disposed) actions.onError(app, error);
-				} finally {
-					pending.delete(key);
-				}
-			}, delayMs);
-			pending.set(key, timer);
-		},
-		dispose() {
-			disposed = true;
-			for (const timer of pending.values()) clearTimeout(timer);
-			pending.clear();
-		}
+// Match an AUMID to an executable inside its exact Windows package family.
+// Requiring the same display name avoids merging separate apps shipped in one
+// package; two different AUMIDs never match through this fallback.
+export function matchesPackagedExecutable(
+	a: Pick<AppInfo, "path" | "name">,
+	b: Pick<AppInfo, "path" | "name">
+): boolean {
+	if (!a.name.trim() || a.name.trim().toLowerCase() !== b.name.trim().toLowerCase()) return false;
+	const family = (path: string) => {
+		const match = /^([^/\\!]+_[^/\\!_]+)![^/\\!]+$/.exec(path.toLowerCase());
+		return match?.[1];
 	};
+	const executableFamily = (path: string) => {
+		const match = /(?:^|\/)windowsapps\/([^/]+)\/.+\.exe$/.exec(
+			path.toLowerCase().replace(/\\/g, "/")
+		);
+		if (!match) return undefined;
+		const parts = match[1].split("_");
+		if (parts.length !== 5 || !/^\d+\.\d+\.\d+\.\d+$/.test(parts[1]) || !parts[4]) return undefined;
+		return `${parts[0]}_${parts[4]}`;
+	};
+	const aFamily = family(a.path);
+	const bFamily = family(b.path);
+	if (!!aFamily === !!bFamily) return false;
+	return aFamily ? aFamily === executableFamily(b.path) : bFamily === executableFamily(a.path);
 }
 
 const trayPath = (app: TrayApp) => app.path.toLowerCase().replace(/\\/g, "/");
@@ -78,6 +67,7 @@ const ownsVisibleWindow = (window: AppInfo, tray: TrayApp) =>
 	// A window whose UI runs in a helper process (Steam's steamwebhelper.exe)
 	// is reported under the app's own exe; its tray icon belongs to that exe.
 	// Browser hosts are excluded: one exe hosts many unrelated web apps.
+	matchesPackagedExecutable(window, tray) ||
 	(!isBrowserHostPath(window.path) &&
 		window.path.toLowerCase().replace(/\\/g, "/") === trayPath(tray));
 

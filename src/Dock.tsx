@@ -10,8 +10,8 @@ import { useSettingsSync } from "./hooks/useSettingsSync";
 import { reloadIfMirrorWasStale } from "./hooks/settingsMirror";
 
 import {
-	createTrayLaunchFallback,
 	backgroundTrayId,
+	matchesPackagedExecutable,
 	mergeTrayApps,
 	selectDockTrayApps,
 	type AppInfo,
@@ -80,6 +80,7 @@ function sameRunningApps(left: AppInfo[], right: AppInfo[]): boolean {
 export function isSameApp(a: AppInfo, b: AppInfo): boolean {
 	if (!a.path || !b.path) return false;
 	if (itemKey(a) === itemKey(b)) return true;
+	if (matchesPackagedExecutable(a, b)) return true;
 	// Browser hosts run many apps under one exe — only the full identity
 	// (which folds in the window/AUMID name) can match those.
 	if (isBrowserHost(a.path) || isBrowserHost(b.path)) return false;
@@ -226,21 +227,6 @@ const Dock = memo(function Dock() {
 	const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
 	const [activeOrder, setActiveOrder] = useState<string[]>([]);
 	const observedTrayPathsRef = useRef(new Set<string>());
-	const trayLaunchFallbackRef = useRef<ReturnType<typeof createTrayLaunchFallback> | null>(null);
-	useEffect(() => {
-		const fallback = createTrayLaunchFallback({
-			hasWindow: async (app) =>
-				(await invoke<AppInfo[]>("get_active_windows")).some((window) => isSameApp(app, window)),
-			launch: (app) => invoke("open_app", { appName: app.path }),
-			onError: (app, error) =>
-				console.error(`Failed to launch ${app.name} after its tray icon:`, error)
-		});
-		trayLaunchFallbackRef.current = fallback;
-		return () => {
-			fallback.dispose();
-			trayLaunchFallbackRef.current = null;
-		};
-	}, []);
 	const [isDragging, setIsDragging] = useState(false);
 	const [hoveredApp, setHoveredApp] = useState<string | null>(null);
 	const [pressedApp, setPressedApp] = useState<string | null>(null);
@@ -742,7 +728,6 @@ const Dock = memo(function Dock() {
 				await invoke("open_app", { appName: "start" });
 			} else if (app.is_background) {
 				await invoke("activate_tray_icon", { trayId: backgroundTrayId(app) });
-				trayLaunchFallbackRef.current?.schedule(app);
 			} else if (app.all_hwnds && app.all_hwnds.length > 1) {
 				// Several windows: bring the most recent forward, then cycle.
 				await invoke("focus_app_windows", { hwnds: app.all_hwnds.map(([hwnd]) => hwnd) });
