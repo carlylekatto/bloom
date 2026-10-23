@@ -814,6 +814,64 @@ pub fn resolve_executable_path(name: &str) -> Option<String> {
     known_install_location(&file)
 }
 
+/// The version in a Squirrel version folder's name: `app-1.0.9264` is
+/// `[1, 0, 9264]`. Compared as numbers, so `app-1.0.10000` is newer.
+fn squirrel_folder_version(name: &str) -> Option<Vec<u64>> {
+    let version = name
+        .get(..4)?
+        .eq_ignore_ascii_case("app-")
+        .then(|| &name[4..])?;
+    version
+        .split('.')
+        .map(|part| part.parse::<u64>().ok())
+        .collect()
+}
+
+/// The newest of a Squirrel app's version folders, by name.
+fn newest_squirrel_folder<'a>(names: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
+    names
+        .into_iter()
+        .filter_map(|name| squirrel_folder_version(name).map(|v| (v, name)))
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, name)| name)
+}
+
+/// Where an app installed by Squirrel (Discord, Slack, GitHub Desktop, Teams
+/// classic, Postman, Figma) lives now. Squirrel keeps each version in its own
+/// `app-<version>` folder next to `Update.exe` and deletes the old one after an
+/// update, so a path saved earlier, such as a dock pin, can point at a folder
+/// that's gone. Returns the same executable in the newest version folder (or in
+/// `current`, which some apps use), or None when the path still exists or isn't
+/// in a version folder.
+pub fn moved_squirrel_exe(path: &str) -> Option<String> {
+    let path = std::path::Path::new(path.trim().trim_matches('"'));
+    if path.exists() {
+        return None;
+    }
+    let folder = path.parent()?;
+    let folder_name = folder.file_name()?.to_str()?;
+    if squirrel_folder_version(folder_name).is_none()
+        && !folder_name.eq_ignore_ascii_case("current")
+    {
+        return None;
+    }
+    let root = folder.parent()?;
+    let exe = path.file_name()?;
+    let names: Vec<String> = std::fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.path().join(exe).is_file())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    let newest = newest_squirrel_folder(names.iter().map(String::as_str)).or_else(|| {
+        names
+            .iter()
+            .find(|n| n.eq_ignore_ascii_case("current"))
+            .map(String::as_str)
+    })?;
+    Some(root.join(newest).join(exe).to_string_lossy().into_owned())
+}
+
 /// Reads `HKCU`/`HKLM\Software\Microsoft\Windows\CurrentVersion\App Paths\<file>`.
 fn app_paths_lookup(file: &str) -> Option<String> {
     use windows::Win32::System::Registry::{
@@ -1604,8 +1662,9 @@ pub fn capture_hwnd_to_base64(hwnd: HWND, max_width: u32, max_height: u32) -> Op
 #[cfg(test)]
 mod tests {
     use super::{
-        click_through_style, expand_env_vars, is_placed_rect, marker_contents, parse_marker_pid,
-        parse_marker_rect, parse_marker_secondaries, parse_marker_state, relaunch_executable,
+        click_through_style, expand_env_vars, is_placed_rect, marker_contents, moved_squirrel_exe,
+        newest_squirrel_folder, parse_marker_pid, parse_marker_rect, parse_marker_secondaries,
+        parse_marker_state, relaunch_executable,
     };
 
     #[test]
@@ -1626,6 +1685,53 @@ mod tests {
         assert_eq!(relaunch_executable(&format!("{exe} --argument")), None);
         assert_eq!(relaunch_executable("C:\\does\\not\\exist.exe"), None);
         assert_eq!(relaunch_executable(""), None);
+    }
+
+    #[test]
+    fn picks_the_newest_squirrel_version_by_number() {
+        assert_eq!(
+            newest_squirrel_folder(["app-1.0.9264", "app-1.0.10000", "app-1.0.999", "packages"]),
+            Some("app-1.0.10000")
+        );
+        assert_eq!(
+            newest_squirrel_folder(["App-3.2", "app-3.10"]),
+            Some("app-3.10")
+        );
+        assert_eq!(
+            newest_squirrel_folder(["app-beta", "current", "packages"]),
+            None
+        );
+    }
+
+    #[test]
+    fn finds_a_squirrel_app_after_an_update() {
+        let root = std::env::temp_dir().join(format!("bloom-squirrel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for version in ["app-1.0.9264", "app-1.0.10000"] {
+            std::fs::create_dir_all(root.join(version)).unwrap();
+            std::fs::write(root.join(version).join("Discord.exe"), b"").unwrap();
+        }
+        // A newer folder without the exe (an update still unpacking) is skipped.
+        std::fs::create_dir_all(root.join("app-1.0.20000")).unwrap();
+        let stale = root.join("app-1.0.9262").join("Discord.exe");
+        let moved = moved_squirrel_exe(&stale.to_string_lossy());
+        assert_eq!(
+            moved.as_deref(),
+            Some(
+                root.join("app-1.0.10000")
+                    .join("Discord.exe")
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+        // A path that still exists, or that isn't in a version folder, stays put.
+        let current = root.join("app-1.0.9264").join("Discord.exe");
+        assert_eq!(moved_squirrel_exe(&current.to_string_lossy()), None);
+        assert_eq!(
+            moved_squirrel_exe(&root.join("Discord.exe").to_string_lossy()),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

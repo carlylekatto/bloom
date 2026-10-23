@@ -784,42 +784,10 @@ fn launch_path(path: &str) {
             path.to_string()
         };
 
-        if !Path::new(&final_path).exists() {
-            let file_name = Path::new(&final_path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_lowercase();
-
-            // Handle Discord/Slack style auto-updaters (app-x.x.x folder structure)
-            if file_name == "discord.exe"
-                || file_name == "slack.exe"
-                || file_name == "githubdesktop.exe"
-                || file_name == "zentwilight.exe"
-            {
-                if let Some(parent) = Path::new(&final_path).parent().and_then(|p| p.parent()) {
-                    if parent.exists() {
-                        if let Ok(entries) = std::fs::read_dir(parent) {
-                            let mut app_dirs = Vec::new();
-                            for entry in entries.flatten() {
-                                let name = entry.file_name().to_string_lossy().to_string();
-                                if (name.starts_with("app-") || name.starts_with("current"))
-                                    && entry.path().is_dir()
-                                {
-                                    app_dirs.push(entry.path());
-                                }
-                            }
-                            app_dirs.sort();
-                            if let Some(latest) = app_dirs.last() {
-                                let exe = latest.join(Path::new(&final_path).file_name().unwrap());
-                                if exe.exists() {
-                                    final_path = exe.to_string_lossy().to_string();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        // An app installed by Squirrel moves to a new version folder when it
+        // updates (Discord, Slack, GitHub Desktop).
+        if let Some(moved) = crate::utils::moved_squirrel_exe(&final_path) {
+            final_path = moved;
         }
 
         let wide_path: Vec<u16> = final_path
@@ -1737,6 +1705,12 @@ pub async fn get_app_icon(
         if let Some(resolved) = resolve_executable_path(&path) {
             path = resolved;
         }
+    }
+    // A pin to a Squirrel app (Discord, Slack) can point at a version folder
+    // its updater has since deleted. The icon was cached under that path, so
+    // this only shows once the cache is cleared; take the current version's.
+    if let Some(moved) = crate::utils::moved_squirrel_exe(&path) {
+        path = moved;
     }
 
     // Strategy 2: Shell-resolved app icons (Store/UWP/PWA packages) and executables
