@@ -538,14 +538,7 @@ fn get_uwp_launch_cmd(exe_path: &str) -> Option<String> {
     None
 }
 
-/// Duplicate-event guard. Kept well below the double-click interval so a
-/// double-click still toggles twice.
-const START_TOGGLE_DEBOUNCE_MS: i64 = 80;
-/// Hold time for the Windows key so the shell registers a deliberate tap.
-/// A zero-length tap is dropped by the shell and never opens Start.
-const START_WIN_KEY_HOLD_MS: u64 = 40;
-
-fn send_key_tap(vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY, hold_ms: u64) {
+fn send_key_tap(vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, KEYBDINPUT, KEYEVENTF_KEYUP,
     };
@@ -575,9 +568,6 @@ fn send_key_tap(vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY, ho
     }];
     unsafe {
         SendInput(&down, std::mem::size_of::<INPUT>() as i32);
-        if hold_ms > 0 {
-            std::thread::sleep(std::time::Duration::from_millis(hold_ms));
-        }
         SendInput(&up, std::mem::size_of::<INPUT>() as i32);
     }
 }
@@ -624,12 +614,8 @@ pub fn is_start_menu_open() -> bool {
     }
 }
 
-/// Toggle the native Start menu. Checks whether the menu currently owns the
-/// foreground window instead of blindly tapping Win: rapid Win taps are ignored
-/// by the shell while the menu animates, which made a second click replay the
-/// open animation. When the menu is open it is dismissed with Escape, which is
-/// deterministic. The tiny debounce only coalesces duplicate events; it must
-/// stay well below the double-click interval so a double-click still closes.
+/// Open Start through Explorer, independently of the foreground app's integrity
+/// level. An open menu is dismissed with Escape rather than another open request.
 ///
 /// Start also closes itself on the press of a click outside it, the Start
 /// button included, so by the time the click arrives the menu is often gone.
@@ -637,20 +623,29 @@ pub fn is_start_menu_open() -> bool {
 /// was, the press closed it and the click leaves it closed, however long the
 /// button was held.
 fn toggle_start_menu() {
-    let now = get_now_ms();
-    if now - LAST_START_TOGGLE_MS.load(Ordering::Relaxed) < START_TOGGLE_DEBOUNCE_MS {
-        return;
-    }
-    LAST_START_TOGGLE_MS.store(now, Ordering::Relaxed);
     // Taken here, so a press is only ever used by the click it started.
     let open_at_press = START_OPEN_AT_PRESS.swap(false, Ordering::Relaxed);
 
     tauri::async_runtime::spawn_blocking(move || {
-        use windows::Win32::UI::Input::KeyboardAndMouse::{VK_ESCAPE, VK_LWIN};
+        use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            FindWindowW, PostMessageW, SC_TASKLIST, WM_SYSCOMMAND,
+        };
         if is_start_menu_open() {
-            send_key_tap(VK_ESCAPE, 0);
+            send_key_tap(VK_ESCAPE);
         } else if !open_at_press {
-            send_key_tap(VK_LWIN, START_WIN_KEY_HOLD_MS);
+            // Ask Explorer directly. SendInput can be blocked while an elevated
+            // app owns the foreground; opening Settings happened to avoid that.
+            unsafe {
+                if let Ok(tray) = FindWindowW(windows::core::w!("Shell_TrayWnd"), None) {
+                    let _ = PostMessageW(
+                        Some(tray),
+                        WM_SYSCOMMAND,
+                        windows::Win32::Foundation::WPARAM(SC_TASKLIST as usize),
+                        windows::Win32::Foundation::LPARAM(0),
+                    );
+                }
+            }
         }
     });
 }
