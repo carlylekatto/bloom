@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { mirrorSetting } from "./settingsEvents";
 
 function convertSettingValue(value: any): any {
 	if (value === "true") return true;
@@ -34,6 +35,7 @@ export function useSettingsSync(
 	useEffect(() => {
 		const unlistenSC = listen<{ key: string; value: any }>("settings-changed", (event) => {
 			const { key, value } = event.payload;
+			mirrorSetting(key, value);
 			const handler = handlersRef.current[key];
 			if (handler && value !== null && value !== undefined) {
 				handler(convertSettingValue(value));
@@ -45,13 +47,7 @@ export function useSettingsSync(
 			(event) => {
 				const { key, value } = event.payload;
 
-				if (key === "bloom-weather-lat" || key === "bloom-weather-lon") {
-					localStorage.removeItem(key);
-				} else if (value !== null) {
-					localStorage.setItem(key, String(value));
-				} else {
-					localStorage.removeItem(key);
-				}
+				mirrorSetting(key, value);
 
 				const handler = handlersRef.current[key];
 				if (handler && value !== null && value !== undefined) {

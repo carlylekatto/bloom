@@ -1185,7 +1185,21 @@ pub fn atomic_write_file(path: &std::path::Path, content: &[u8]) -> Result<(), S
         let _ = std::fs::remove_file(&temp);
         return Err(format!("Could not write {}: {e}", temp.display()));
     }
-    if let Err(e) = std::fs::rename(&temp, path) {
+    // Antivirus, indexers and editors can briefly open the destination without
+    // FILE_SHARE_DELETE. Keep the original intact and retry only these Windows
+    // sharing/access errors; a permanent failure is still returned to Settings.
+    let mut replaced = std::fs::rename(&temp, path);
+    for delay_ms in [25, 50, 100, 200] {
+        if !replaced
+            .as_ref()
+            .is_err_and(|e| matches!(e.raw_os_error(), Some(5 | 32 | 33)))
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        replaced = std::fs::rename(&temp, path);
+    }
+    if let Err(e) = replaced {
         let _ = std::fs::remove_file(&temp);
         return Err(format!("Could not replace {}: {e}", path.display()));
     }
@@ -1832,6 +1846,32 @@ mod tests {
     }
 
     #[test]
+    fn atomic_settings_save_retries_a_temporary_windows_file_lock() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let _guard = TEST_SETTINGS_LOCK.lock().unwrap();
+        let path = test_settings_path();
+        std::fs::write(&path, "{\"bloom-existing\":\"true\"}").unwrap();
+        // Allow reads and writes, but withhold FILE_SHARE_DELETE as an editor
+        // or scanner can do. Replacing this file fails until the handle closes.
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(3)
+            .open(&path)
+            .unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            drop(held);
+        });
+        super::save_setting_file(&path, "bloom-new".into(), "false".into()).unwrap();
+        release.join().unwrap();
+        let settings = super::read_settings_file(&path).unwrap();
+        assert_eq!(settings["bloom-existing"], "true");
+        assert_eq!(settings["bloom-new"], "false");
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_dir(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
     fn taskbar_marker_round_trips_the_original_state() {
         for state in [0, 1, 2, 3] {
             let rect = windows::Win32::Foundation::RECT {
@@ -1846,6 +1886,43 @@ mod tests {
             assert_eq!(parse_marker_rect(&contents, "primary="), Some(rect));
             assert!(parse_marker_secondaries(&contents).is_empty());
         }
+    }
+
+    #[test]
+    fn a_failed_setting_write_keeps_the_file_and_cache_then_allows_retry() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let _guard = TEST_SETTINGS_LOCK.lock().unwrap();
+        let path = test_settings_path();
+        super::save_setting_file(&path, "bloom-theme-mode".into(), "dark".into()).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(3)
+            .open(&path)
+            .unwrap();
+        let result = super::save_setting_file(&path, "bloom-theme-mode".into(), "light".into());
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(
+            crate::state::SETTINGS_CACHE.get().unwrap().lock().unwrap()["bloom-theme-mode"],
+            "dark"
+        );
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            1
+        );
+        drop(held);
+        super::save_setting_file(&path, "bloom-theme-mode".into(), "light".into()).unwrap();
+        assert_eq!(
+            super::read_settings_file(&path).unwrap()["bloom-theme-mode"],
+            "light"
+        );
+        assert_eq!(
+            crate::state::SETTINGS_CACHE.get().unwrap().lock().unwrap()["bloom-theme-mode"],
+            "light"
+        );
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_dir(path.parent().unwrap()).unwrap();
     }
 
     #[test]

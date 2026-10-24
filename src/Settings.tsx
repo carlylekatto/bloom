@@ -134,7 +134,12 @@ function SettingsApp() {
 				}}>
 					{settings.saveError && (
 						<div className="settings-save-error" role="alert">
-							<span>Changes could not be saved. Your saved settings have been restored.</span>
+							<span>
+								Changes could not be saved. Your saved settings have been restored.
+								{settings.saveErrorDetail && (
+									<small style={{ display: "block" }}>{settings.saveErrorDetail}</small>
+								)}
+							</span>
 							<button onClick={settings.dismissSaveError} aria-label="Dismiss save error">
 								<X size={14} strokeWidth={2} />
 							</button>
