@@ -11,6 +11,7 @@ import { reloadIfMirrorWasStale } from "./hooks/settingsMirror";
 
 import {
 	backgroundTrayId,
+	dockIconKey,
 	matchesPackagedExecutable,
 	mergeTrayApps,
 	selectDockTrayApps,
@@ -174,6 +175,8 @@ const Dock = memo(function Dock() {
 	const [pinnedApps, setPinnedApps] = useState<AppInfo[]>([]);
 	const [activeApps, setActiveApps] = useState<AppInfo[]>([]);
 	const iconsRef = useRef<Record<string, string>>({});
+	const pendingIconsRef = useRef(new Set<string>());
+	const iconGenerationRef = useRef(0);
 	const [, setIconsTick] = useState(0);
 	const [dockMode, setDockMode] = useState(() => {
 		const raw = localStorage.getItem("bloom-dock-mode") || "smart";
@@ -442,7 +445,7 @@ const Dock = memo(function Dock() {
 
 			const pinned = await invoke<AppInfo[]>("load_pinned_apps");
 			setPinnedApps(pinned.map((a) => ({ ...a, is_pinned: true })));
-			pinned.forEach((app) => fetchIcon(app.path));
+			pinned.forEach((app) => fetchIcon(app.path, app.name));
 
 			// Warm the installed-apps cache in the background so the add-app
 			// popup opens with data ready instead of waiting on the scan.
@@ -595,6 +598,7 @@ const Dock = memo(function Dock() {
 					: next;
 			});
 
+			pinnedApps.forEach((app) => fetchIcon(app.path, app.name));
 			running.forEach((app) => fetchIcon(app.path, app.name, app.hwnd));
 		};
 
@@ -614,39 +618,42 @@ const Dock = memo(function Dock() {
 		};
 	}, [isDragging, pinnedApps, dockShowTrayApps]);
 
-	const fetchIcon = async (path: string, name?: string, hwnd?: number, retryCount = 0) => {
+	const fetchIcon = async (path: string, name?: string, hwnd?: number) => {
 		const isHost = isBrowserHost(path);
 		const cacheKey =
 			isHost && name ? `${path}:${name.toLowerCase()}` : hwnd ? `${path}-${hwnd}` : path;
 
-		if (iconsRef.current[cacheKey]) return;
+		if (iconsRef.current[cacheKey] || pendingIconsRef.current.has(cacheKey)) return;
+		pendingIconsRef.current.add(cacheKey);
+		const generation = iconGenerationRef.current;
 		try {
 			const icon = await invoke<string | null>("get_app_icon", {
 				path,
 				name: name || null,
 				hwnd: hwnd || null
 			});
-			if (icon) {
+			if (icon && generation === iconGenerationRef.current) {
 				iconsRef.current[cacheKey] = icon;
 				if (!isHost) iconsRef.current[path] = icon;
 				setIconsTick((t) => t + 1);
-			} else if (retryCount < 3 && !hwnd) {
-				setTimeout(() => fetchIcon(path, name, undefined, retryCount + 1), 3000 * (retryCount + 1));
 			}
 		} catch (e) {
 			console.error(`Failed to fetch icon for ${path}:`, e);
-			if (retryCount < 3 && !hwnd) {
-				setTimeout(() => fetchIcon(path, name, undefined, retryCount + 1), 3000 * (retryCount + 1));
-			}
+		} finally {
+			// Window changes and the existing poll retry missing icons. Only an
+			// actual in-flight request is excluded; no timer can retain a stale HWND.
+			if (generation === iconGenerationRef.current) pendingIconsRef.current.delete(cacheKey);
 		}
 	};
 
 	const handleClearIconCache = async () => {
 		try {
 			await invoke("clear_icon_cache");
+			iconGenerationRef.current += 1;
+			pendingIconsRef.current.clear();
 			iconsRef.current = {};
 			setIconsTick((t) => t + 1);
-			pinnedApps.forEach((app) => fetchIcon(app.path));
+			pinnedApps.forEach((app) => fetchIcon(app.path, app.name));
 		} catch (e) {
 			console.error("Failed to clear icon cache:", e);
 		}
@@ -1108,6 +1115,8 @@ const Dock = memo(function Dock() {
 				return {
 					...p,
 					is_running: !!running,
+					icon_path: running?.path,
+					icon_name: running?.name,
 					hwnd: running?.hwnd,
 					all_hwnds: running?.all_hwnds,
 					tray_ids: running?.tray_ids,
@@ -1622,6 +1631,7 @@ const Dock = memo(function Dock() {
 														const icon =
 															customIcons[cacheKey] ||
 															(allowPathFallback && customIcons[app.path]) ||
+															iconsRef.current[dockIconKey(app, isHost)] ||
 															iconsRef.current[cacheKey] ||
 															(allowPathFallback && iconsRef.current[app.path]) ||
 															app.icon;
@@ -1786,6 +1796,7 @@ const Dock = memo(function Dock() {
 												const icon =
 													customIcons[cacheKey] ||
 													(allowPathFallback && customIcons[app.path]) ||
+													iconsRef.current[dockIconKey(app, isHost)] ||
 													iconsRef.current[cacheKey] ||
 													(allowPathFallback && iconsRef.current[app.path]) ||
 													app.icon;

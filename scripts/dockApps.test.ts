@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	dockIconKey,
 	matchesPackagedExecutable,
 	mergeTrayApps,
 	selectDockTrayApps,
@@ -20,6 +21,23 @@ const windowApp: AppInfo = {
 	hwnd: 11,
 	all_hwnds: [[11, "Discord"]]
 };
+test("a running pinned browser uses the live icon name without sharing another web app's icon", () => {
+	const pin = {
+		path: "C:\\Browser\\chrome.exe",
+		name: "Chrome",
+		icon_name: "Google Chrome",
+		hwnd: 12
+	};
+	expect(dockIconKey(pin, true)).toBe("C:\\Browser\\chrome.exe:google chrome");
+	expect(dockIconKey({ ...pin, icon_name: "YouTube" }, true)).not.toBe(dockIconKey(pin, true));
+	expect(dockIconKey({ ...pin, icon_name: undefined }, true)).toBe(
+		"C:\\Browser\\chrome.exe:chrome"
+	);
+	expect(dockIconKey(pin, false)).toBe("C:\\Browser\\chrome.exe-12");
+	expect(dockIconKey({ ...pin, icon_path: "C:\\Updated\\chrome.exe" }, true)).toBe(
+		"C:\\Updated\\chrome.exe:google chrome"
+	);
+});
 describe("dock tray lifecycle", () => {
 	test("merges a helper-owned Steam window through its resolved executable identity", () => {
 		const steam = { ...tray, path: "C:\\Steam\\steam.exe", window_handles: [22] };

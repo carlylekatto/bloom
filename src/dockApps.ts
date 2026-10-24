@@ -9,6 +9,9 @@ export interface AppInfo {
 	all_hwnds?: [number, string][];
 	tray_ids?: string[];
 	is_background?: boolean;
+	// A pin keeps its display name, but its icon is cached under the live name.
+	icon_name?: string;
+	icon_path?: string;
 }
 
 export interface TrayApp {
@@ -27,6 +30,18 @@ export function backgroundTrayId(app: AppInfo): string {
 		throw new Error("Select this app's tray icon from its dock context menu.");
 	}
 	return app.tray_ids[0];
+}
+
+export function dockIconKey(
+	app: Pick<AppInfo, "path" | "name" | "hwnd" | "icon_name" | "icon_path">,
+	isHost: boolean
+) {
+	const path = app.icon_path ?? app.path;
+	return isHost
+		? `${path}:${(app.icon_name ?? app.name).toLowerCase()}`
+		: app.hwnd
+			? `${path}-${app.hwnd}`
+			: path;
 }
 
 // Match an AUMID to an executable inside its exact Windows package family.
