@@ -856,7 +856,6 @@ function App() {
 		if (raw === "auto-hide") return "smart";
 		return raw;
 	});
-	const [dndActive, setDndActive] = useState(false);
 	const [dockEnabled, setDockEnabled] = useState(
 		() => localStorage.getItem("bloom-dock-enabled") !== "false"
 	);
@@ -4146,12 +4145,14 @@ function App() {
 											{/* Circular Actions Row */}
 											<div className="cc-circular-actions-row">
 												<button
-													className={`cc-circular-btn ${dndActive ? "active" : ""}`}
+													className="cc-circular-btn"
 													onClick={(e) => {
 														e.stopPropagation();
-														setDndActive((prev) => !prev);
+														invoke("open_app", { appName: "ms-settings:notifications" }).catch(
+															console.error
+														);
 													}}
-													title={`Focus / DND: ${dndActive ? "On" : "Off"}`}
+													title="Do Not Disturb — Open Windows notification settings"
 												>
 													<MoonIcon />
 												</button>
