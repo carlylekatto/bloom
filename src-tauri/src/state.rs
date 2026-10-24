@@ -22,6 +22,8 @@ pub static TRAY_INTERACTION_ACTIVE: AtomicBool = AtomicBool::new(false);
 pub static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 pub static DOCK_RECT: Mutex<Option<IntRect>> = Mutex::new(None);
+/// Expanded bar geometry, independent of the animated hit area and previews.
+pub static DOCK_OVERLAP_RECT: Mutex<Option<IntRect>> = Mutex::new(None);
 pub static NOTCH_RECT: Mutex<Option<IntRect>> = Mutex::new(None);
 pub static DOCK_IS_HOVERED: AtomicBool = AtomicBool::new(false);
 pub static NOTCH_IS_HOVERED: AtomicBool = AtomicBool::new(false);

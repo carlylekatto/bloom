@@ -122,9 +122,14 @@ pub fn shelf_drag_icon() -> Option<String> {
 }
 
 #[tauri::command]
-pub async fn update_dock_rect(app: AppHandle, rect: IntRect) {
+pub async fn update_dock_rect(app: AppHandle, rect: IntRect, overlap_rect: Option<IntRect>) {
     if let Ok(mut r) = DOCK_RECT.lock() {
         *r = Some(rect);
+    }
+    if let Some(rect) = overlap_rect {
+        if let Ok(mut r) = DOCK_OVERLAP_RECT.lock() {
+            *r = Some(rect);
+        }
     }
     // The hit region just changed under a possibly-stationary cursor. The mouse
     // hook will not fire until the pointer moves again, so re-decide now or the

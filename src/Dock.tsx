@@ -8,6 +8,7 @@ import { EdgeSurface } from "./components/EdgeSurface";
 import { initTheme } from "./theme";
 import { useSettingsSync } from "./hooks/useSettingsSync";
 import { reloadIfMirrorWasStale } from "./hooks/settingsMirror";
+import { dockOverlapSpan } from "./dockGeometry";
 
 import {
 	backgroundTrayId,
@@ -350,29 +351,47 @@ const Dock = memo(function Dock() {
 
 	useEffect(() => {
 		const updateRect = () => {
-			if (!dockRef.current) return;
-			const pill = dockRef.current.getBoundingClientRect();
-			// Union the pill with the preview card when one is actually on
-			// screen. Both boxes are measured, never assumed: the card's size
-			// depends on how many windows the app has and how wide they render,
-			// so any fixed padding was wrong for every app except by accident.
-			// `previewRef` is briefly stale while the exit animation plays, in
-			// which case the pill alone is the correct region.
-			const card = previewRef.current?.getBoundingClientRect();
-			const hasCard = !!card && card.width > 0 && card.height > 0;
+	if (!dockRef.current) return;
+	const pill = dockRef.current.getBoundingClientRect();
+	// Union the pill with the preview card when one is actually on
+	// screen. Both boxes are measured, never assumed: the card's size
+	// depends on how many windows the app has and how wide they render,
+	// so any fixed padding was wrong for every app except by accident.
+	// `previewRef` is briefly stale while the exit animation plays, in
+	// which case the pill alone is the correct region.
+	const card = previewRef.current?.getBoundingClientRect();
+	const hasCard = !!card && card.width > 0 && card.height > 0;
+	// The overlap decision must NOT move with the animated hit region:
+	// while hidden the pill is 34px, but the expanded dock still occupies
+	// its natural width, so a maximized window touching only that strip
+	// has to count as overlapped. Measure the natural content width and
+	// send it separately from the click region.
+	const content = dockRef.current.querySelector<HTMLElement>(".dock-reorder-container");
+	const style = getComputedStyle(dockRef.current);
+	const overlap = content
+		? dockOverlapSpan(
+				window.innerWidth,
+				content.scrollWidth,
+				parseFloat(style.paddingLeft) + parseFloat(style.paddingRight),
+				scale
+			)
+		: null;
 
-			invoke("update_dock_rect", {
-				rect: {
-					x: Math.round(hasCard ? Math.min(pill.x, card.x) : pill.x),
-					y: Math.round(hasCard ? Math.min(pill.y, card.y) : pill.y),
-					width: Math.round(
-						hasCard ? Math.max(pill.right, card.right) - Math.min(pill.x, card.x) : pill.width
-					),
-					height: Math.round(
-						hasCard ? Math.max(pill.bottom, card.bottom) - Math.min(pill.y, card.y) : pill.height
-					)
-				}
-			}).catch(() => {});
+	invoke("update_dock_rect", {
+		rect: {
+			x: Math.round(hasCard ? Math.min(pill.x, card.x) : pill.x),
+			y: Math.round(hasCard ? Math.min(pill.y, card.y) : pill.y),
+			width: Math.round(
+				hasCard ? Math.max(pill.right, card.right) - Math.min(pill.x, card.x) : pill.width
+			),
+			height: Math.round(
+				hasCard ? Math.max(pill.bottom, card.bottom) - Math.min(pill.y, card.y) : pill.height
+			)
+		},
+		overlapRect: overlap
+			? { ...overlap, y: Math.round(pill.y), height: Math.round(pill.height) }
+			: null
+	}).catch(() => {});
 		};
 
 		updateRect();
@@ -392,13 +411,15 @@ const Dock = memo(function Dock() {
 		// window count changes (one thumbnail becomes three) but not while the
 		// card merely animates — which is exactly the distinction needed.
 		if (previewRef.current) observer.observe(previewRef.current);
+		const content = dockRef.current?.querySelector(".dock-reorder-container");
+		if (content) observer.observe(content);
 
 		return () => {
 			clearTimeout(settle);
 			window.removeEventListener("resize", updateRect);
 			observer.disconnect();
 		};
-	}, [pinnedApps, activeApps, isHidden, previewData, scale]);
+	}, [pinnedApps, activeApps, isHidden, isExpanded, previewData, scale]);
 
 	useEffect(() => {
 		const init = async () => {

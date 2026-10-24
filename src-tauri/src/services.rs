@@ -1504,6 +1504,13 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
                 if !found_window {
                     hwnd = HWND(std::ptr::null_mut());
                 }
+                // Overlap uses the expanded content width. Hit-testing still
+                // uses DOCK_RECT, which includes the live pill and previews.
+                let measured_overlap_span = DOCK_OVERLAP_RECT
+                    .lock()
+                    .ok()
+                    .and_then(|r| *r)
+                    .map(|r| dock_span_px(r, cached_scale));
 
                 let dock_span = DOCK_RECT
                     .lock()
@@ -1516,7 +1523,7 @@ pub fn setup_system_worker(app_handle: AppHandle) -> Sender<SystemCommand> {
                 // would stop overlapping, show the dock, overlap again, and flicker.
                 // DOCK_RECT itself must stay the live rect: the mouse hook hit-tests
                 // against it, and while hidden only the pill is clickable.
-                let overlap_span = held_dock_span.or(dock_span);
+                let overlap_span = measured_overlap_span.or(held_dock_span).or(dock_span);
 
                 let mut should_overlap = false;
                 let mut should_notch_overlap = false;
@@ -4942,6 +4949,40 @@ fn recover_from_webview_failure(handle: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn smart_dock_overlap_uses_the_expanded_bar_instead_of_the_live_pill() {
+        let expanded = super::dock_span_px(
+            crate::types::IntRect {
+                x: 320,
+                y: 0,
+                width: 640,
+                height: 56,
+            },
+            1.5,
+        );
+        assert_eq!(expanded, (480, 1440));
+        let pill = (935, 985);
+        let run_dialog = (12, 620, 1190);
+        let trigger_y = 1116;
+        assert!(super::window_reaches_dock(expanded, run_dialog, trigger_y));
+        assert!(!super::window_reaches_dock(pill, run_dialog, trigger_y));
+        assert!(!super::window_reaches_dock(
+            expanded,
+            (12, 620, 900),
+            trigger_y
+        ));
+        assert!(!super::window_reaches_dock(
+            expanded,
+            (0, 400, 1190),
+            trigger_y
+        ));
+        assert!(!super::window_reaches_dock(
+            expanded,
+            (1500, 1800, 1190),
+            trigger_y
+        ));
+    }
+
     use super::{
         cursor_in_menu_rect, dock_span_px, is_helper_name, is_launchable_entry, is_primary_monitor,
         is_start_menu_process_path, notch_mode_reserves_work_area, pack_cursor, process_exe_name,
