@@ -48,6 +48,7 @@ import { deviceArtFor } from "./devices/deviceArtFor";
 import { deviceLookFor } from "./devices/deviceLooks";
 import type { BudLevel, BudsBattery } from "./devices/connectedDevices";
 import { ConnectedDevicesPanel } from "./components/ConnectedDevicesPanel";
+import { useConnectedDevices } from "./hooks/useConnectedDevices";
 import { isWiredAudio, usbArtFor, usbDisplayName, type UsbIdentity } from "./devices/usbArtFor";
 import type { DeviceArtKey } from "./devices/art";
 import {
@@ -837,6 +838,7 @@ function App() {
 	// The height the Connected devices panel's content needs; the open notch
 	// follows it up to DEVICES_MAX_HEIGHT, past which the list scrolls.
 	const [devicesContentHeight, setDevicesContentHeight] = useState(DEVICES_MAX_HEIGHT);
+	const devicesPanelHeight = Math.min(DEVICES_MAX_HEIGHT, Math.max(DEVICES_MIN_HEIGHT, devicesContentHeight));
 	// True from an alert appearing until its exit animation has finished, so
 	// the clock row only comes back once the alert has faded out.
 	const [deviceAlertOnScreen, setDeviceAlertOnScreen] = useState(false);
@@ -1128,6 +1130,7 @@ function App() {
 	const [settingsDevicesPanelEnabled, setSettingsDevicesPanelEnabled] = useState(
 		() => localStorage.getItem("bloom-notch-devices-enabled") === "true"
 	);
+	const connectedDevices = useConnectedDevices(windowLabel === "main" && settingsDevicesPanelEnabled);
 	const [settingsTimerSoundEnabled, setSettingsTimerSoundEnabled] = useState(
 		() => localStorage.getItem("bloom-timer-sound-enabled") !== "false"
 	);
@@ -3252,7 +3255,7 @@ function App() {
 			return (isOpen ? 230 : 36) + (appMixerOpen ? 120 : 0) + monitorRowsPx;
 		}
 		if (bloomMode === "devices") {
-			return Math.min(DEVICES_MAX_HEIGHT, Math.max(DEVICES_MIN_HEIGHT, devicesContentHeight));
+			return devicesPanelHeight;
 		}
 		if (bloomMode === "wifi" || bloomMode === "bluetooth") return 300;
 		if (bloomMode === "status") return 36;
@@ -4046,6 +4049,8 @@ function App() {
 											transition={{ type: "spring", stiffness: 400, damping: 30 }}
 										>
 											<ConnectedDevicesPanel
+												data={connectedDevices}
+												height={devicesPanelHeight}
 												buds={budsById}
 												lowThreshold={lowBatteryThreshold}
 												onContentHeight={setDevicesContentHeight}

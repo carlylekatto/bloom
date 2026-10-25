@@ -1,38 +1,18 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { Laptop, LoaderCircle, MonitorSmartphone, Zap } from "lucide-react";
 import { DeviceArt } from "../devices/DeviceArt";
 import { deviceArtFor } from "../devices/deviceArtFor";
 import { DEVICE_LOOKS, WIRED_DEVICE_LOOKS, deviceLookFor, setDeviceLook } from "../devices/deviceLooks";
-import { isWiredAudio, usbArtFor, usbDisplayName, type UsbIdentity } from "../devices/usbArtFor";
+import { isWiredAudio, usbArtFor, usbDisplayName } from "../devices/usbArtFor";
 import { groupDevices, type BudLevel, type BudsBattery, type DeviceEntry } from "../devices/connectedDevices";
+import type { ConnectedDevicesState, PcBattery } from "../hooks/useConnectedDevices";
 import "./QuickPanel.css";
 
-interface BtDevice {
-	id: string;
-	name: string;
-	kind: string;
-	form: string | null;
-	connected: boolean;
-	battery: number | null;
-}
-
-/** A USB device, or what's in the 3.5 mm jack, as the backend lists them. */
-interface WiredDevice extends UsbIdentity {
-	id: string;
-}
-
-interface PcBattery {
-	present: boolean;
-	percent: number | null;
-	plugged_in: boolean;
-	charging: boolean;
-	seconds_left: number | null;
-	seconds_to_full: number | null;
-}
-
 interface ConnectedDevicesPanelProps {
+	data: ConnectedDevicesState;
+	/** Final notch height, independent of the shell's expansion animation. */
+	height: number;
 	/** Each bud's and the case's level, by device id, as last reported. */
 	buds: Record<string, BudsBattery>;
 	/** The user's low battery threshold, in percent. */
@@ -84,58 +64,21 @@ function Meter({ label, part, low }: { label?: string; part: BudLevel; low: bool
  * choice, the drawing its connection popup uses, which wired devices have no
  * other place to set.
  */
-export function ConnectedDevicesPanel({ buds, lowThreshold, onContentHeight }: ConnectedDevicesPanelProps) {
+export function ConnectedDevicesPanel({ data, height, buds, lowThreshold, onContentHeight }: ConnectedDevicesPanelProps) {
 	const panelRef = useRef<HTMLDivElement>(null);
 	const headerRef = useRef<HTMLDivElement>(null);
 	const listRef = useRef<HTMLDivElement>(null);
 	const reportedHeight = useRef(0);
-	const [devices, setDevices] = useState<BtDevice[] | null>(null);
-	const [wired, setWired] = useState<WiredDevice[]>([]);
-	const [pc, setPc] = useState<PcBattery | null>(null);
+	const { devices, wired, pc } = data;
 	const [expanded, setExpanded] = useState<string | null>(null);
 	// Bumped when a look is picked, so the rows draw the new pick.
 	const [looksVersion, setLooksVersion] = useState(0);
 
-	const refresh = useCallback(async () => {
-		try {
-			setDevices(await invoke<BtDevice[]>("bluetooth_list_devices"));
-		} catch (e) {
-			console.error("[connected devices] Bluetooth list failed:", e);
-			setDevices([]);
-		}
-		Promise.all([
-			invoke<WiredDevice[]>("usb_list_devices").catch(() => []),
-			invoke<WiredDevice[]>("jack_list_devices").catch(() => [])
-		]).then(([usb, jack]) => setWired([...jack, ...usb]));
-		invoke<PcBattery>("get_battery_details")
-			.then(setPc)
-			.catch(() => setPc(null));
-	}, []);
-
 	useEffect(() => {
-		void refresh();
 		// Earbuds' own levels go stale; read them again (the backend skips
 		// any read in the last minute and a half).
 		invoke("bluetooth_refresh_buds").catch(() => {});
-		let debounce: number | null = null;
-		const later = () => {
-			if (debounce !== null) window.clearTimeout(debounce);
-			debounce = window.setTimeout(() => {
-				debounce = null;
-				void refresh();
-			}, 300);
-		};
-		const unlisteners = ["bluetooth-changed", "bluetooth-battery", "usb-connection", "wired-audio-connection"].map(
-			(event) => listen(event, later)
-		);
-		// The PC's battery changes slowly; once a minute keeps its time left fresh.
-		const tick = window.setInterval(() => void refresh(), 60_000);
-		return () => {
-			if (debounce !== null) window.clearTimeout(debounce);
-			window.clearInterval(tick);
-			unlisteners.forEach((u) => u.then((f) => f()));
-		};
-	}, [refresh]);
+	}, []);
 
 	const guessFor = useCallback(
 		(entry: DeviceEntry) => {
@@ -289,8 +232,10 @@ export function ConnectedDevicesPanel({ buds, lowThreshold, onContentHeight }: C
 		return () => observer.disconnect();
 	});
 
+	// Lay out against the final height; the expanding shell clips the reveal.
+	// Otherwise its intermediate heights briefly make a fitting list scroll.
 	return (
-		<div ref={panelRef} className="qp bh" onClick={(e) => e.stopPropagation()}>
+		<div ref={panelRef} className="qp bh" style={{ height: height - 36 }} onClick={(e) => e.stopPropagation()}>
 			<div ref={headerRef} className="qp-header">
 				<span className="qp-row-icon bh-title-icon">
 					<MonitorSmartphone />
