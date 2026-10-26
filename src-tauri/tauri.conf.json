@@ -35,6 +35,7 @@
 			{
 				"label": "settings",
 				"title": "Settings",
+				"url": "settings.html",
 				"width": 740,
 				"height": 560,
 				"decorations": false,
