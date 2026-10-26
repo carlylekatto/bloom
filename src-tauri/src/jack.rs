@@ -164,7 +164,7 @@ fn is_jack_container(container: &GUID) -> bool {
             &no_props,
             DeviceInformationKind::Device,
         )
-        .and_then(|op| op.get())
+        .and_then(|op| op.join())
         .ok()
         .map(|found| {
             (0..found.Size().unwrap_or(0))
