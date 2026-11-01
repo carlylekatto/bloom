@@ -48,6 +48,7 @@ import { deviceArtFor } from "./devices/deviceArtFor";
 import { deviceLookFor } from "./devices/deviceLooks";
 import type { BudLevel, BudsBattery } from "./devices/connectedDevices";
 import { ConnectedDevicesPanel } from "./components/ConnectedDevicesPanel";
+import { Calendar, calendarRows } from "./components/Calendar";
 import { useConnectedDevices } from "./hooks/useConnectedDevices";
 import { isWiredAudio, usbArtFor, usbDisplayName, type UsbIdentity } from "./devices/usbArtFor";
 import type { DeviceArtKey } from "./devices/art";
@@ -67,7 +68,14 @@ import {
 	ChevronRight,
 	Inbox,
 	Music,
-	Zap
+	Zap,
+	VolumeX,
+	Volume,
+	Volume1,
+	Volume2,
+	SunDim,
+	SunMedium,
+	Sun
 } from "lucide-react";
 
 /**
@@ -87,6 +95,7 @@ const asNotchPanel = (value: unknown): NotchPanel | null =>
 
 // The Connected devices panel grows with its list between these heights;
 // the maximum is the size the panel had before it grew to fit.
+const COMMAND_CENTER_WIDTH = 375;
 const DEVICES_MIN_HEIGHT = 150;
 const DEVICES_MAX_HEIGHT = 300;
 
@@ -373,16 +382,6 @@ export const Visualizer = memo(function Visualizer({
 		</div>
 	);
 });
-
-// Number of week rows the current month occupies. Calendar mode sizes the
-// notch to the month so five-row months stay compact and six-row months never
-// clip the last row.
-const calendarMonthRows = (() => {
-	const now = new Date();
-	const firstWeekday = new Date(now.getFullYear(), now.getMonth(), 1).getDay();
-	const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-	return Math.ceil((firstWeekday + daysInMonth) / 7);
-})();
 
 // Odometer-style digit for the timer clock. When the value changes the old
 // digit rolls up and out while the new one rolls in from below with a slight
@@ -763,6 +762,12 @@ function App() {
 		perDisplay: boolean;
 	}>({ master: null, monitors: [], perDisplay: false });
 	const [showMonitorBreakdown, setShowMonitorBreakdown] = useState(false);
+	const previousVolume = useRef(0.5);
+	const previousBrightness = useRef(50);
+	const [calendarMonth, setCalendarMonth] = useState(() => {
+		const now = new Date();
+		return new Date(now.getFullYear(), now.getMonth(), 1);
+	});
 
 	// System metrics for status widgets
 	const [cpuUsage, setCpuUsage] = useState(0);
@@ -1963,7 +1968,7 @@ function App() {
 	const handleWheel = (e: React.WheelEvent) => {
 		const target = e.target as HTMLElement;
 		if (
-			target.closest(".calendar-grid") ||
+			target.closest(".calendar-container") ||
 			target.closest(".timer-column") ||
 			target.closest(".shelf-content") ||
 			target.closest(".qp-list")
@@ -2766,13 +2771,29 @@ function App() {
 	const handleVolumeChange = useCallback(
 		(newVol: number) => {
 			volumeSync.touch();
+			if (volume > 0 && !isMuted) previousVolume.current = volume;
 			setVolume(newVol);
 			// set_volume unmutes for any non-zero level.
 			setIsMuted(newVol === 0);
 			sendVolume(newVol);
 		},
-		[sendVolume, volumeSync]
+		[sendVolume, volumeSync, volume, isMuted]
 	);
+	const CommandVolumeIcon =
+		displayVolume === 0
+			? VolumeX
+			: displayVolume < 0.33
+				? Volume
+				: displayVolume < 0.67
+					? Volume1
+					: Volume2;
+	const CommandBrightnessIcon =
+		currentBrightness < 34 ? SunDim : currentBrightness < 67 ? SunMedium : Sun;
+	const toggleVolumeLevel = () => {
+		handleVolumeChange(
+			displayVolume > 0 ? 0 : isMuted && volume > 0 ? volume : previousVolume.current
+		);
+	};
 
 	// WiFi toggle
 	const toggleWifi = useCallback(async () => {
@@ -2892,11 +2913,13 @@ function App() {
 
 	const handleBrightnessChange = useCallback(
 		(newVal: number) => {
+		(newVal: number) => {
 			brightnessSync.touch();
+			if (currentBrightness > 0) previousBrightness.current = currentBrightness;
 			setCurrentBrightness(newVal);
 			sendBrightness(newVal);
 		},
-		[sendBrightness, brightnessSync]
+		[sendBrightness, brightnessSync, currentBrightness]
 	);
 
 	// Per-display brightness. Reading a display is an I2C round trip (~40 ms),
@@ -2961,6 +2984,9 @@ function App() {
 		},
 		[sendMonitorBrightness]
 	);
+	const toggleBrightnessLevel = () => {
+		handleBrightnessChange(currentBrightness > 0 ? 0 : previousBrightness.current);
+	};
 
 	// Open system tray (unhide taskbar and invoke Win+B)
 	const openSystemTray = useCallback(async (e: React.MouseEvent) => {
@@ -3197,8 +3223,9 @@ function App() {
 		if (bloomMode === "device" && deviceAlert) return 330;
 		if (isCalendarMode) return 480;
 		if (bloomMode === "shelf") return 380;
-		if (bloomMode === "command-center" && isOpen) return 350;
-		if (bloomMode === "wifi" || bloomMode === "bluetooth" || bloomMode === "devices") return 350;
+		if (bloomMode === "command-center" && isOpen) return COMMAND_CENTER_WIDTH;
+		if (bloomMode === "wifi" || bloomMode === "bluetooth") return COMMAND_CENTER_WIDTH;
+		if (bloomMode === "devices") return 350;
 		if (showMusicOnStatusHover) {
 			return 170 + (settingsVisualizerEnabled ? 30 : 0);
 		}
@@ -3229,7 +3256,7 @@ function App() {
 		// Device alert: the drawing, with room for its motion.
 		if (bloomMode === "device" && deviceAlert) return 76;
 		// Sized to the calendar's week-row count plus the timer's fixed content.
-		if (bloomMode === "calendar") return calendarMonthRows >= 6 ? 305 : 273;
+		if (bloomMode === "calendar") return 112 + calendarRows(calendarMonth) * 30;
 		// Shelf expands on mode alone (no hover needed: there is no cursor
 		// hover during an OS drag) and is sized to exactly one row of tiles,
 		// plus room for the scrollbar once the tiles overflow it.
@@ -3715,6 +3742,7 @@ function App() {
 																	min="0"
 																	max="1"
 																	step="0.01"
+																	aria-label="Volume"
 																	value={displayVolume}
 																	onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
 																	onPointerDown={(e) => e.stopPropagation()}
@@ -4262,7 +4290,16 @@ function App() {
 												{/* Volume Slider */}
 												<div className="cc-classic-slider-row">
 													<div className="cc-classic-slider-label">
-														<VolumeLowIcon style={{ opacity: 0.5 }} />
+														<button
+															type="button"
+															className="cc-level-toggle"
+															onClick={toggleVolumeLevel}
+															aria-label={displayVolume > 0 ? "Mute volume" : "Restore volume"}
+															aria-pressed={displayVolume === 0}
+															title={displayVolume > 0 ? "Mute volume" : "Restore volume"}
+														>
+															<CommandVolumeIcon />
+														</button>
 														<span>Volume</span>
 													</div>
 													<div className="cc-classic-slider-track">
@@ -4271,6 +4308,7 @@ function App() {
 															min="0"
 															max="1"
 															step="0.01"
+															aria-label="Volume"
 															value={displayVolume}
 															onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
 															onPointerDown={(e) => e.stopPropagation()}
@@ -4326,7 +4364,20 @@ function App() {
 												{/* Brightness Slider */}
 												<div className="cc-classic-slider-row">
 													<div className="cc-classic-slider-label">
-														<SunBrightnessIcon size={BRIGHTNESS_ICON_SIZE} />
+														<button
+															type="button"
+															className="cc-level-toggle"
+															onClick={toggleBrightnessLevel}
+															aria-label={
+																currentBrightness > 0 ? "Minimize brightness" : "Restore brightness"
+															}
+															aria-pressed={currentBrightness === 0}
+															title={
+																currentBrightness > 0 ? "Minimize brightness" : "Restore brightness"
+															}
+														>
+															<CommandBrightnessIcon />
+														</button>
 														<span>Brightness</span>
 													</div>
 													<div className="cc-classic-slider-track">
@@ -4335,6 +4386,7 @@ function App() {
 															min="0"
 															max="100"
 															step="1"
+															aria-label="Brightness"
 															value={currentBrightness}
 															onChange={(e) => handleBrightnessChange(parseInt(e.target.value))}
 															onPointerDown={(e) => e.stopPropagation()}
@@ -4528,7 +4580,7 @@ function App() {
 											transition={{ type: "spring", stiffness: 400, damping: 30 }}
 										>
 											<div className="calendar-column">
-												<Calendar />
+												<Calendar month={calendarMonth} onMonthChange={setCalendarMonth} />
 											</div>
 
 											<div className="timer-column">
@@ -4817,57 +4869,6 @@ function App() {
 	);
 }
 
-function Calendar() {
-	const [date] = useState(new Date());
-
-	const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
-	const firstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
-
-	const currentMonth = date.getMonth();
-	const currentYear = date.getFullYear();
-	const monthName = date.toLocaleString("default", { month: "long" });
-
-	const totalDays = daysInMonth(currentYear, currentMonth);
-	const startDay = firstDayOfMonth(currentYear, currentMonth);
-	const days = [];
-
-	// Padding for start of month
-	for (let i = 0; i < startDay; i++) {
-		days.push(<div key={`empty-${i}`} className="calendar-day empty" />);
-	}
-
-	// Actual days
-	const today = new Date().getDate();
-	const isCurrentMonth =
-		new Date().getMonth() === currentMonth && new Date().getFullYear() === currentYear;
-
-	for (let i = 1; i <= totalDays; i++) {
-		days.push(
-			<div key={i} className={`calendar-day ${isCurrentMonth && i === today ? "today" : ""}`}>
-				{i}
-			</div>
-		);
-	}
-
-	return (
-		<div className="calendar-container">
-			<div className="calendar-header">
-				<span className="month-year">
-					{monthName} {currentYear}
-				</span>
-			</div>
-			<div className="calendar-grid">
-				{["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
-					<div key={`${d}-${i}`} className="day-name">
-						{d}
-					</div>
-				))}
-				{days}
-			</div>
-		</div>
-	);
-}
-
 function BluetoothIcon() {
 	return (
 		<svg
@@ -4922,7 +4923,6 @@ function MonitorIcon() {
 		</svg>
 	);
 }
-
 function MoonIcon() {
 	return (
 		<svg
