@@ -1182,6 +1182,9 @@ function App() {
 	const [settingsCornersEnabled, setSettingsCornersEnabled] = useState(
 		() => localStorage.getItem("bloom-corners-enabled") === "true"
 	);
+	const [edgeShineEnabled, setEdgeShineEnabled] = useState(
+		() => localStorage.getItem("bloom-edge-shine-enabled") !== "false"
+	);
 	const [mediaLayout, setMediaLayout] = useState<"classic" | "compact">(
 		() => (localStorage.getItem("bloom-media-layout") as "classic" | "compact") || "classic"
 	);
@@ -1237,6 +1240,7 @@ function App() {
 					getVal("bloom-media-compact-glow-enabled", "true") !== "false"
 				);
 				setSettingsCornersEnabled(getVal("bloom-corners-enabled", "false") === "true");
+				setEdgeShineEnabled(getVal("bloom-edge-shine-enabled", "true") !== "false");
 				setTimeFormat24h(getVal("bloom-time-format-24h") === "true");
 
 				const thresholdStr = getVal("bloom-low-battery-threshold", "20");
@@ -1362,6 +1366,7 @@ function App() {
 			"bloom-media-compact-glow-enabled": setSettingsCompactGlowEnabled,
 			"bloom-media-layout": setMediaLayout,
 			"bloom-corners-enabled": setSettingsCornersEnabled,
+			"bloom-edge-shine-enabled": setEdgeShineEnabled,
 			"bloom-scale": setScale,
 			"bloom-low-battery-threshold": setLowBatteryThreshold,
 			"bloom-dock-enabled": setDockEnabled,
@@ -3474,7 +3479,7 @@ function App() {
 						default: { type: "spring", stiffness: 500, damping: 30, mass: 1 }
 					}}
 				>
-					<EdgeSurface edge="top" flares={isImpacted} />
+					<EdgeSurface edge="top" flares={isImpacted} reflective={edgeShineEnabled} />
 					<AnimatePresence>
 						{isMusicMode && settingsAmbienceEnabled && albumArtUrl && isOpen && !isCalendarMode && (
 							<motion.div

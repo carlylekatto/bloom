@@ -81,6 +81,9 @@ export function useSettings() {
 	const [cornersEnabled, setCornersEnabled] = useState(
 		() => localStorage.getItem("bloom-corners-enabled") === "true"
 	);
+	const [edgeShineEnabled, setEdgeShineEnabled] = useState(
+		() => localStorage.getItem("bloom-edge-shine-enabled") !== "false"
+	);
 	const [showUpdateIndicator, setShowUpdateIndicator] = useState(
 		() => localStorage.getItem("bloom-show-update-indicator") !== "false"
 	);
@@ -236,6 +239,7 @@ export function useSettings() {
 			apply(getVal("bloom-media-ambience-enabled"), setMediaAmbienceEnabled, readBool);
 			apply(getVal("bloom-media-compact-glow-enabled"), setMediaCompactGlowEnabled, readBool);
 			apply(getVal("bloom-corners-enabled"), setCornersEnabled, readBool);
+			setEdgeShineEnabled(getVal("bloom-edge-shine-enabled") !== "false");
 			apply(getVal("bloom-time-format-24h"), setTimeFormat24h, readBool);
 			apply(getVal("bloom-show-update-indicator"), setShowUpdateIndicator, readBool);
 			apply(getVal("bloom-auto-update"), setAutoUpdate, readBool);
@@ -416,6 +420,7 @@ export function useSettings() {
 		"bloom-media-compact-glow-enabled": setMediaCompactGlowEnabled,
 		"bloom-media-layout": setMediaLayout,
 		"bloom-corners-enabled": setCornersEnabled,
+		"bloom-edge-shine-enabled": setEdgeShineEnabled,
 		"bloom-show-update-indicator": setShowUpdateIndicator,
 		"bloom-time-format-24h": setTimeFormat24h,
 		"bloom-low-battery-threshold": setLowBatteryThreshold,
@@ -669,6 +674,11 @@ export function useSettings() {
 		saveSetting("bloom-media-compact-glow-enabled", String(next));
 	};
 
+	const toggleEdgeShine = () => {
+		const next = !edgeShineEnabled;
+		setEdgeShineEnabled(next);
+		saveSetting("bloom-edge-shine-enabled", String(next));
+	};
 	const toggleCorners = () => {
 		const next = !cornersEnabled;
 		setCornersEnabled(next);
@@ -1010,6 +1020,8 @@ export function useSettings() {
 		handleScaleChange,
 		cornersEnabled,
 		toggleCorners,
+		edgeShineEnabled,
+		toggleEdgeShine,
 
 		// Theme
 		themeMode,
