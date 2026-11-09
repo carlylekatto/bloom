@@ -518,15 +518,28 @@ fn normalized_label(label: &str) -> String {
         .collect()
 }
 
-unsafe fn matches_icon_label(label: &str, target: &Icon) -> bool {
-    let name = normalized_label(label);
-    let friendly = normalized_label(&crate::commands::friendly_process_name(&target.path));
-    let stem = std::path::Path::new(&target.path)
+fn icon_label_aliases(path: &str, friendly: &str, installed: Option<&str>) -> [String; 3] {
+    let stem = std::path::Path::new(path)
         .file_stem()
         .and_then(|s| s.to_str())
-        .map(normalized_label)
         .unwrap_or_default();
-    (!friendly.is_empty() && name.contains(&friendly)) || (!stem.is_empty() && name.contains(&stem))
+    [stem, friendly, installed.unwrap_or_default()].map(normalized_label)
+}
+
+fn matching_icon_indices<'a>(
+    label: &str,
+    aliases: &'a [[String; 3]],
+) -> impl Iterator<Item = usize> + 'a {
+    let label = normalized_label(label);
+    aliases
+        .iter()
+        .enumerate()
+        .filter_map(move |(index, names)| {
+            names
+                .iter()
+                .any(|name| !name.is_empty() && label.contains(name))
+                .then_some(index)
+        })
 }
 
 /// The button drawn over a point, given in physical or (for a scaled window)
@@ -558,7 +571,11 @@ unsafe fn button_at(buttons: &[IUIAutomationElement], rect: RECT, dpi: f64) -> O
 /// last instead of failing; a label that contradicts a position still stops it,
 /// since opening the wrong app's menu is worse than opening none. An icon's
 /// tooltip is app-defined (PhoneExperienceHost.exe shows "Phone Link -
-/// Disconnected"), so a missing name match is not an identity failure.
+/// Disconnected"), so a missing name match is not by itself an identity failure.
+///
+/// Names are matched through `icon_label_aliases`, so an icon can be found by
+/// its Start menu name as well as by its executable description: a packaged app
+/// often shows one in the tray and the other on disk.
 unsafe fn find_overflow_icon(
     automation: &IUIAutomation,
     icons: &[Icon],
@@ -571,6 +588,18 @@ unsafe fn find_overflow_icon(
         .iter()
         .position(|icon| icon.key == target.key)
         .ok_or("This app's tray icon is not in the overflow.")?;
+    // Packaged apps can use their Start menu name in the tray even when the
+    // executable and its file description use an internal name.
+    let aliases: Vec<_> = hidden
+        .iter()
+        .map(|icon| {
+            icon_label_aliases(
+                &icon.path,
+                &crate::commands::friendly_process_name(&icon.path),
+                crate::commands::installed_app_name(&icon.path).as_deref(),
+            )
+        })
+        .collect();
     let hwnd = FindWindowW(w!("TopLevelWindowForOverflowXamlIsland"), PCWSTR::null())
         .or_else(|_| FindWindowW(w!("NotifyIconOverflowWindow"), PCWSTR::null()))
         .map_err(|_| "Windows tray overflow is unavailable.")?;
@@ -604,26 +633,29 @@ unsafe fn find_overflow_icon(
             buttons.push(element);
         }
     }
+    // The strongest evidence is the button Windows itself reports the icon on.
     if let Ok(rect) = Shell_NotifyIconGetRect(&target.identifier) {
         if let Some(button) = button_at(&buttons, rect, GetDpiForWindow(hwnd).max(96) as f64) {
             return button.cast().map_err(|e| e.to_string());
         }
     }
-    let labelled: Vec<_> = buttons
-        .iter()
-        .filter(|button| {
-            let label = button.CurrentName().unwrap_or_default().to_string();
-            matches_icon_label(&label, target)
-                && !hidden
-                    .iter()
-                    .any(|icon| icon.key != target.key && matches_icon_label(&label, icon))
-        })
-        .collect();
-    if let [button] = labelled[..] {
-        return button.cast().map_err(|e| e.to_string());
-    }
     if buttons.len() != hidden.len() {
-        return Err(LOST.into());
+        // Some overflow icons can't be attributed to a process Bloom can read,
+        // so positions don't line up. Fall back to the button whose label
+        // names the target app, but only when exactly one does and it names
+        // no other known icon; otherwise opening a menu could hit another app.
+        let labelled: Vec<_> = buttons
+            .iter()
+            .filter(|button| {
+                let label = button.CurrentName().unwrap_or_default().to_string();
+                matching_icon_indices(&label, &aliases).eq([position])
+            })
+            .collect();
+        if let [button] = labelled[..] {
+            return button.cast().map_err(|e| e.to_string());
+        }
+        return Err("Bloom could not uniquely identify this app's Windows tray icon.".into());
+    }
     }
     // Name matches provide cross-checks of Explorer's ordered UI tree, but
     // cannot be required for every icon because tooltip text is app-defined.
@@ -635,14 +667,13 @@ unsafe fn find_overflow_icon(
         if label.trim().is_empty() {
             continue;
         }
-        let matches: Vec<_> = hidden
-            .iter()
-            .enumerate()
-            .filter(|(_, icon)| matches_icon_label(&label, icon))
-            .map(|(index, _)| index)
-            .collect();
-        if matches.len() == 1 && matches[0] != button_index {
-            return Err(LOST.into());
+        let mut matches = matching_icon_indices(&label, &aliases);
+        let Some(index) = matches.next() else {
+            continue;
+        };
+        if index != button_index && matches.next().is_none() {
+            return Err("Windows tray icon order changed. Please try again.".into());
+        }
         }
     }
     buttons.remove(position).cast().map_err(|e| e.to_string())
@@ -1021,6 +1052,32 @@ pub fn interact(key: &str, context_menu: bool) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overflow_labels_match_the_start_menu_name_of_a_packaged_app() {
+        let aliases = [
+            icon_label_aliases(r"C:\Apps\steam.exe", "Steam Client", Some("Steam")),
+            icon_label_aliases(
+                r"C:\Program Files\WindowsApps\WhatsApp\WhatsApp.Root.exe",
+                "WhatsApp.Root",
+                Some("WhatsApp"),
+            ),
+        ];
+        assert!(matching_icon_indices("WhatsApp", &aliases).eq([1]));
+        assert!(matching_icon_indices("WhatsApp.Root", &aliases).eq([1]));
+        assert!(matching_icon_indices("Steam Client", &aliases).eq([0]));
+        assert!(matching_icon_indices("", &aliases).next().is_none());
+    }
+
+    #[test]
+    fn overflow_labels_do_not_identify_one_icon_when_app_names_overlap() {
+        let aliases = [
+            icon_label_aliases("WhatsApp.Root.exe", "WhatsApp.Root", Some("WhatsApp")),
+            icon_label_aliases("Another.exe", "Another", Some("WhatsApp")),
+        ];
+        assert!(matching_icon_indices("WhatsApp", &aliases).eq([0, 1]));
+    }
+
     #[test]
     fn custom_tray_menu_detection_excludes_normal_client_windows() {
         assert!(is_tray_menu_window("#32768", 0));

@@ -105,6 +105,9 @@ export function useSettings() {
 	const [dockIconOnly, setDockIconOnly] = useState(
 		() => localStorage.getItem("bloom-dock-icon-only") === "true"
 	);
+	const [dockShowBackgroundApps, setDockShowBackgroundApps] = useState(
+		() => localStorage.getItem("bloom-dock-show-background-apps") !== "false"
+	);
 	const [dockSeparatorEnabled, setDockSeparatorEnabled] = useState(
 		() => localStorage.getItem("bloom-dock-separator-enabled") !== "false"
 	);
@@ -247,6 +250,7 @@ export function useSettings() {
 			apply(getVal("bloom-brightness-edge-enabled"), setBrightnessEdgeEnabled, readBool);
 			apply(getVal("bloom-dock-enabled"), setDockEnabled, readBool);
 			apply(getVal("bloom-dock-preview-enabled"), setDockPreviewEnabled, readBool);
+			setDockShowBackgroundApps(getVal("bloom-dock-show-background-apps") !== "false");
 			apply(getVal("bloom-dock-icon-only"), setDockIconOnly, readBool);
 			apply(getVal("bloom-dock-separator-enabled"), setDockSeparatorEnabled, readBool);
 			apply(getVal("bloom-dock-show-tray-apps"), setDockShowTrayApps, readBool);
@@ -396,6 +400,7 @@ export function useSettings() {
 		"bloom-dock-show-tray-apps": setDockShowTrayApps,
 		"bloom-start-icon": setStartIcon,
 		"bloom-dock-preview-enabled": setDockPreviewEnabled,
+		"bloom-dock-show-background-apps": { set: setDockShowBackgroundApps, defaultValue: true },
 		"bloom-dock-adaptive": setDockAdaptive,
 		"bloom-dock-win-number-enabled": setDockWinNumberEnabled,
 		"bloom-dock-extras-position": setDockExtrasPosition,
@@ -713,6 +718,12 @@ export function useSettings() {
 		const next = !dockPreviewEnabled;
 		setDockPreviewEnabled(next);
 		saveSetting("bloom-dock-preview-enabled", String(next));
+	};
+
+	const toggleDockShowBackgroundApps = () => {
+		const next = !dockShowBackgroundApps;
+		setDockShowBackgroundApps(next);
+		saveSetting("bloom-dock-show-background-apps", String(next));
 	};
 
 	const toggleDockIconOnly = () => {
@@ -1094,6 +1105,8 @@ export function useSettings() {
 		handleDockEdgeDelayChange,
 		dockPreviewEnabled,
 		toggleDockPreview,
+		dockShowBackgroundApps,
+		toggleDockShowBackgroundApps,
 		dockIconOnly,
 		dockShowTrayApps,
 		toggleDockIconOnly,

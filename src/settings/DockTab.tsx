@@ -5,6 +5,7 @@ import {
 	Eye,
 	EyeOff,
 	Circle,
+	Layers,
 	Columns2,
 	Maximize2,
 	Keyboard,
@@ -111,6 +112,8 @@ interface DockTabProps {
 	handleDockEdgeDelayChange: (val: number) => void;
 	dockPreviewEnabled: boolean;
 	toggleDockPreview: () => void;
+	dockShowBackgroundApps: boolean;
+	toggleDockShowBackgroundApps: () => void;
 	dockIconOnly: boolean;
 	dockShowTrayApps: boolean;
 	toggleDockIconOnly: () => void;
@@ -149,6 +152,8 @@ export function DockTab({
 	handleDockEdgeDelayChange,
 	dockPreviewEnabled,
 	toggleDockPreview,
+	dockShowBackgroundApps,
+	toggleDockShowBackgroundApps,
 	dockIconOnly,
 	dockShowTrayApps,
 	toggleDockShowTrayApps,
@@ -242,6 +247,22 @@ export function DockTab({
 						<SettingRow icon={Eye} label="Show App Previews" desc="Show window thumbnails on hover">
 							<label className="toggle-switch">
 								<input type="checkbox" checked={dockPreviewEnabled} onChange={toggleDockPreview} />
+								<span className="slider"></span>
+							</label>
+						</SettingRow>
+
+						<SettingRow
+							icon={Layers}
+							label="Show Background Apps"
+							desc="Keep apps in the dock when they close to the system tray"
+						>
+							<label className="toggle-switch">
+								<input
+									type="checkbox"
+									aria-label="Show Background Apps"
+									checked={dockShowBackgroundApps}
+									onChange={toggleDockShowBackgroundApps}
+								/>
 								<span className="slider"></span>
 							</label>
 						</SettingRow>

@@ -297,6 +297,8 @@ function SettingsApp() {
 							handleDockEdgeDelayChange={settings.handleDockEdgeDelayChange}
 							dockPreviewEnabled={settings.dockPreviewEnabled}
 							toggleDockPreview={settings.toggleDockPreview}
+							dockShowBackgroundApps={settings.dockShowBackgroundApps}
+							toggleDockShowBackgroundApps={settings.toggleDockShowBackgroundApps}
 							dockIconOnly={settings.dockIconOnly}
 							toggleDockIconOnly={settings.toggleDockIconOnly}
 							dockShowTrayApps={settings.dockShowTrayApps}

@@ -1,6 +1,9 @@
 import { useEffect, useRef } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { listen, type Event } from "@tauri-apps/api/event";
 import { mirrorSetting } from "./settingsEvents";
+
+type SettingSetter = (value: any) => void;
+type SettingHandler = SettingSetter | { set: SettingSetter; defaultValue: unknown };
 
 function convertSettingValue(value: any): any {
 	if (value === "true") return true;
@@ -22,39 +25,29 @@ function convertSettingValue(value: any): any {
  * Uses a ref for handlers so listeners are registered once (not re-registered
  * on every render when a new object literal is passed).
  *
- * @param handlers - Map of bloom-prefixed key → setter
+ * @param handlers - Map of bloom-prefixed keys to setters, optionally with a default for removed keys
  * @param deps - Optional additional dependency array
  */
 export function useSettingsSync(
-	handlers: Record<string, (value: any) => void>,
+	handlers: Record<string, SettingHandler>,
 	deps?: React.DependencyList
 ) {
 	const handlersRef = useRef(handlers);
 	handlersRef.current = handlers;
 
 	useEffect(() => {
-		const unlistenSC = listen<{ key: string; value: any }>("settings-changed", (event) => {
-			const { key, value } = event.payload;
+		const onSetting = ({ payload }: Event<{ key: string; value: unknown }>) => {
+			const { key, value } = payload;
 			mirrorSetting(key, value);
 			const handler = handlersRef.current[key];
-			if (handler && value !== null && value !== undefined) {
-				handler(convertSettingValue(value));
+			if (typeof handler === "function") {
+				if (value != null) handler(convertSettingValue(value));
+			} else if (handler) {
+				handler.set(convertSettingValue(value ?? handler.defaultValue));
 			}
-		});
-
-		const unlistenSEC = listen<{ key: string; value: any }>(
-			"settings-external-changed",
-			(event) => {
-				const { key, value } = event.payload;
-
-				mirrorSetting(key, value);
-
-				const handler = handlersRef.current[key];
-				if (handler && value !== null && value !== undefined) {
-					handler(convertSettingValue(value));
-				}
-			}
-		);
+		};
+		const unlistenSC = listen("settings-changed", onSetting);
+		const unlistenSEC = listen("settings-external-changed", onSetting);
 
 		return () => {
 			unlistenSC.then((fn) => fn());

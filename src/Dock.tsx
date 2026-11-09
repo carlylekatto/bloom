@@ -187,6 +187,9 @@ const Dock = memo(function Dock() {
 	const [dockPreviewEnabled, setDockPreviewEnabled] = useState(
 		() => localStorage.getItem("bloom-dock-preview-enabled") !== "false"
 	);
+	const [dockShowBackgroundApps, setDockShowBackgroundApps] = useState(
+		() => localStorage.getItem("bloom-dock-show-background-apps") !== "false"
+	);
 	const [edgeShineEnabled, setEdgeShineEnabled] = useState(
 		() => localStorage.getItem("bloom-edge-shine-enabled") !== "false"
 	);
@@ -446,6 +449,7 @@ const Dock = memo(function Dock() {
 
 			const preview = getVal("bloom-dock-preview-enabled", "true");
 			setDockPreviewEnabled(preview === "true");
+			setDockShowBackgroundApps(getVal("bloom-dock-show-background-apps") !== "false");
 			setEdgeShineEnabled(getVal("bloom-edge-shine-enabled", "true") !== "false");
 
 			const iconOnly = getVal("bloom-dock-icon-only", "false");
@@ -532,6 +536,7 @@ const Dock = memo(function Dock() {
 	useSettingsSync({
 		"bloom-dock-mode": setDockMode,
 		"bloom-dock-preview-enabled": setDockPreviewEnabled,
+		"bloom-dock-show-background-apps": { set: setDockShowBackgroundApps, defaultValue: true },
 		"bloom-edge-shine-enabled": setEdgeShineEnabled,
 		"bloom-dock-icon-only": setDockIconOnly,
 		"bloom-dock-separator-enabled": setDockSeparatorEnabled,
@@ -1157,11 +1162,11 @@ const Dock = memo(function Dock() {
 			.map((id) => activeApps.find((a) => appIdentity(a.path, a.executable, a.name) === id))
 			.filter(
 				(a): a is AppInfo =>
-					!!a && !matchedRunningKeys.has(appIdentity(a.path, a.executable, a.name))
+					!!a && (dockShowBackgroundApps || !a.is_background) && !matchedRunningKeys.has(itemKey(a))
 			);
 
 		return [...pinned, ...unpinned];
-	}, [pinnedApps, activeApps, activeOrder]);
+	}, [pinnedApps, activeApps, activeOrder, dockShowBackgroundApps]);
 
 	const startItem = useMemo(
 		() => dockItems.find((i) => i.path === "start") as AppInfo,
@@ -1712,7 +1717,7 @@ const Dock = memo(function Dock() {
 														);
 													})()}
 												</motion.div>
-												{app.is_running && (
+												{app.is_running && (dockShowBackgroundApps || !app.is_background) && (
 													<WindowDots
 														count={app.all_hwnds?.length ?? 1}
 														background={app.is_background}
