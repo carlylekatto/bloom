@@ -25,7 +25,6 @@ import {
 	HeadphonesIcon,
 	MixerIcon
 } from "./icons";
-import { SunBrightnessIcon } from "./icons/SunBrightnessIcon";
 import { IconLab } from "./IconLab";
 import { AudioMixer } from "./components/AudioMixer";
 import { CompactMediaPlayer } from "./CompactMediaPlayer";
@@ -448,11 +447,6 @@ interface ShelfItem {
 	text?: string;
 	timestamp: number;
 }
-
-/** Row size for the brightness icon. Its neighbours are pinned to 12px by
- * `.cc-classic-slider-label svg`, so this one sets width/height inline, which
- * beats the stylesheet. Tweak it here and reopen the icon lab to compare. */
-const BRIGHTNESS_ICON_SIZE = 14;
 
 /** One DDC/CI-capable display, as reported by `get_brightness_state`. */
 interface MonitorBrightness {
@@ -2937,7 +2931,6 @@ function App() {
 	}, 50);
 
 	const handleBrightnessChange = useCallback(
-		(newVal: number) => {
 		(newVal: number) => {
 			brightnessSync.touch();
 			if (currentBrightness > 0) previousBrightness.current = currentBrightness;
