@@ -70,13 +70,22 @@
 	right: 13px;
 }
 
-/* A single SVG stroke follows the entire silhouette, including the flares.
-   Its gradient uses the full surface height, so adjoining curves share both
-   their tangent and their brightness. The opaque fill stays seam-free. */
+/* A high-resolution canvas paints only the reflective contour. The fill and
+   flares retain their original CSS geometry and shared surface-opacity mask. */
 .edge-surface-rim {
 	position: absolute;
 	inset: 0;
 	overflow: visible;
+}
+
+/* A layout-isolated notification for radius-only animation frames. It has no
+   painted area and cannot affect the surface's dimensions or silhouette. */
+.edge-surface-invalidation {
+	position: absolute;
+	width: 0;
+	height: 0;
+	contain: strict;
+	visibility: hidden;
 }
 
 .edge-surface--left::before,

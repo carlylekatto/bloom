@@ -3472,7 +3472,7 @@ function App() {
 						default: { type: "spring", stiffness: 500, damping: 30, mass: 1 }
 					}}
 				>
-					<EdgeSurface edge="top" flares={isImpacted} reflective={edgeShineEnabled} />
+					<EdgeSurface edge="top" flares={isImpacted} reflective={edgeShineEnabled} resolutionScale={scale} />
 					<AnimatePresence>
 						{isMusicMode && settingsAmbienceEnabled && albumArtUrl && isOpen && !isCalendarMode && (
 							<motion.div

@@ -134,7 +134,7 @@ export function AppearanceTab({
 
 			<div className="setting-group-label">Display</div>
 			<div className="setting-group">
-				<SettingRow icon={Sparkles} label="Edge shine" desc="Soft reflections around the dock and notch">
+				<SettingRow icon={Sparkles} label="Edge shine" desc="Soft reflections around the dock and notch. Turn off if animations feel less smooth.">
 					<label className="toggle-switch">
 						<input type="checkbox" aria-label="Edge shine" checked={edgeShineEnabled} onChange={toggleEdgeShine} />
 						<span className="slider"></span>
