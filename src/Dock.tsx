@@ -265,6 +265,7 @@ const Dock = memo(function Dock() {
 		parseFloat(localStorage.getItem("bloom-scale") || "1.0")
 	);
 	const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+	const updateDockRectRef = useRef<() => void>(() => {});
 
 	useEffect(() => {
 		const onResize = () => setViewportWidth(window.innerWidth);
@@ -358,50 +359,65 @@ const Dock = memo(function Dock() {
 	}, []);
 
 	useEffect(() => {
+		let lastGeometry = "";
 		const updateRect = () => {
-	if (!dockRef.current) return;
-	const pill = dockRef.current.getBoundingClientRect();
-	// Union the pill with the preview card when one is actually on
-	// screen. Both boxes are measured, never assumed: the card's size
-	// depends on how many windows the app has and how wide they render,
-	// so any fixed padding was wrong for every app except by accident.
-	// `previewRef` is briefly stale while the exit animation plays, in
-	// which case the pill alone is the correct region.
-	const card = previewRef.current?.getBoundingClientRect();
-	const hasCard = !!card && card.width > 0 && card.height > 0;
-	// The overlap decision must NOT move with the animated hit region:
-	// while hidden the pill is 34px, but the expanded dock still occupies
-	// its natural width, so a maximized window touching only that strip
-	// has to count as overlapped. Measure the natural content width and
-	// send it separately from the click region.
-	const content = dockRef.current.querySelector<HTMLElement>(".dock-reorder-container");
-	const style = getComputedStyle(dockRef.current);
-	const overlap = content
-		? dockOverlapSpan(
-				window.innerWidth,
-				content.scrollWidth,
-				parseFloat(style.paddingLeft) + parseFloat(style.paddingRight),
-				scale
-			)
-		: null;
+			if (!dockRef.current) return;
+			const pill = dockRef.current.getBoundingClientRect();
+			// Union the pill with the preview card when one is actually on
+			// screen. Both boxes are measured, never assumed: the card's size
+			// depends on how many windows the app has and how wide they render,
+			// so any fixed padding was wrong for every app except by accident.
+			// `previewRef` is briefly stale while the exit animation plays, in
+			// which case the pill alone is the correct region.
+			const card = previewRef.current?.getBoundingClientRect();
+			const hasCard = !!card && card.width > 0 && card.height > 0;
+			// The overlap decision must NOT move with the animated hit region:
+			// while hidden the pill is 34px, but the expanded dock still occupies
+			// its natural width, so a maximized window touching only that strip
+			// has to count as overlapped. Measure the natural content width and
+			// send it separately from the click region.
+			const content = dockRef.current.querySelector<HTMLElement>(".dock-reorder-container");
+			const style = getComputedStyle(dockRef.current);
+			const overlap = content
+				? dockOverlapSpan(
+						window.innerWidth,
+						content.scrollWidth,
+						parseFloat(style.paddingLeft) + parseFloat(style.paddingRight),
+						scale
+					)
+				: null;
 
-	invoke("update_dock_rect", {
-		rect: {
-			x: Math.round(hasCard ? Math.min(pill.x, card.x) : pill.x),
-			y: Math.round(hasCard ? Math.min(pill.y, card.y) : pill.y),
-			width: Math.round(
-				hasCard ? Math.max(pill.right, card.right) - Math.min(pill.x, card.x) : pill.width
-			),
-			height: Math.round(
-				hasCard ? Math.max(pill.bottom, card.bottom) - Math.min(pill.y, card.y) : pill.height
-			)
-		},
-		overlapRect: overlap
-			? { ...overlap, y: Math.round(pill.y), height: Math.round(pill.height) }
-			: null
-	}).catch(() => {});
+			const geometry = {
+				rect: {
+					x: Math.round(hasCard ? Math.min(pill.x, card.x) : pill.x),
+					y: Math.round(hasCard ? Math.min(pill.y, card.y) : pill.y),
+					width: Math.round(
+						hasCard ? Math.max(pill.right, card.right) - Math.min(pill.x, card.x) : pill.width
+					),
+					height: Math.round(
+						hasCard ? Math.max(pill.bottom, card.bottom) - Math.min(pill.y, card.y) : pill.height
+					)
+				},
+				overlapRect: overlap
+					? { ...overlap, y: Math.round(pill.y), height: Math.round(pill.height) }
+					: null
+			};
+			// Layout projection transforms do not fire ResizeObserver, so the
+			// region can go stale while the dock animates. Re-send it only when
+			// the geometry actually changed: the backend hit-tests against it
+			// on every mouse move, and a stale region is what makes the
+			// right-most dock item unclickable on scaled displays.
+			const key = JSON.stringify(geometry);
+			if (key !== lastGeometry) {
+				lastGeometry = key;
+				invoke("update_dock_rect", geometry).catch(() => {
+					if (lastGeometry === key) lastGeometry = "";
+				});
+			}
+		};
 		};
 
+		updateDockRectRef.current = updateRect;
 		updateRect();
 
 		// The card scales and fades in over ~150ms, so a measurement taken now
@@ -423,6 +439,8 @@ const Dock = memo(function Dock() {
 		if (content) observer.observe(content);
 
 		return () => {
+		return () => {
+			updateDockRectRef.current = () => {};
 			clearTimeout(settle);
 			window.removeEventListener("resize", updateRect);
 			observer.disconnect();
@@ -1395,9 +1413,13 @@ const Dock = memo(function Dock() {
 					alignItems: "flex-end"
 				}}
 			>
+				{/* Layout projection transforms do not trigger ResizeObserver. */}
 				<motion.div
 					ref={dockRef}
 					layout
+					onUpdate={() => updateDockRectRef.current()}
+					onAnimationComplete={() => updateDockRectRef.current()}
+					onLayoutAnimationComplete={() => updateDockRectRef.current()}
 					className={`dock ${isExpanded && !isHidden ? "dock-expanded" : ""} ${isImpacted && !isExpanded && !isHidden ? "dock-impacted" : ""} ${dockIconOnly ? "dock-icon-only" : ""} ${isAdaptive ? "dock-adaptive" : ""}`}
 					onMouseEnter={() => setIsDockHovered(true)}
 					onMouseLeave={() => {
