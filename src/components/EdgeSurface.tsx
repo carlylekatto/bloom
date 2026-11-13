@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
-import { edgeSurfaceContour } from "./edgeSurfaceContour";
+import { edgeSurfaceContour, resolveCornerRadius } from "./edgeSurfaceContour";
 import "./EdgeSurface.css";
 
 type Edge = "top" | "bottom" | "left" | "right";
@@ -61,12 +61,13 @@ export function EdgeSurface({
 		const draw = () => {
 			if (!(width > 26 && height > 0)) return;
 			const style = getComputedStyle(parent);
+			// Percentages reference the pill; the surface extends 13px past each side.
 			const radii = [
 				style.borderTopLeftRadius,
 				style.borderTopRightRadius,
 				style.borderBottomLeftRadius,
 				style.borderBottomRightRadius
-			].map((value) => parseFloat(value) || 0);
+			].map((value) => resolveCornerRadius(value, width - 26, height));
 			if (paletteDirty) {
 				const surfaceStyle = getComputedStyle(surface);
 				colors = ["--surface-line", "--surface-side-light", "--surface-highlight"].map((property) =>
