@@ -369,8 +369,8 @@ export function Onboarding({
 									initial={reducedMotion ? false : { pathLength: 0 }}
 									animate={{ pathLength: 1 }}
 									transition={{
-										duration: reducedMotion ? 0 : 0.42,
-										delay: reducedMotion ? 0 : 0.16,
+										duration: reducedMotion ? 0 : 0.22,
+										delay: reducedMotion ? 0 : 0.08,
 										ease: "easeInOut"
 									}}
 								/>
@@ -379,8 +379,8 @@ export function Onboarding({
 									initial={reducedMotion ? false : { pathLength: 0 }}
 									animate={{ pathLength: 1 }}
 									transition={{
-										duration: reducedMotion ? 0 : 0.14,
-										delay: reducedMotion ? 0 : 0.58,
+										duration: reducedMotion ? 0 : 0.08,
+										delay: reducedMotion ? 0 : 0.30,
 										ease: "easeOut"
 									}}
 								/>
