@@ -21,9 +21,7 @@
 	border: 1px solid rgba(255, 255, 255, 0.16);
 	border-radius: 24px;
 	background: #202020;
-	box-shadow:
-		inset 0 1px 0 #ffffff0c,
-		0 24px 70px #00000050;
+	box-shadow: inset 0 1px 0 #ffffff0c;
 	text-align: left;
 	user-select: none;
 }
@@ -53,7 +51,7 @@
 }
 .onboarding-arrow.is-outside.points-down {
 	left: calc(50% - 188px);
-	bottom: -56px;
+	bottom: -54px;
 	rotate: 180deg;
 }
 .onboarding-arrow.is-inside {
@@ -63,6 +61,7 @@
 	height: 28px;
 }
 .onboarding-arrow.is-inside.points-down {
+	top: 63px;
 	rotate: 180deg;
 }
 .onboarding-watermark {

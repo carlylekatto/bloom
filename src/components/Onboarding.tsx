@@ -357,13 +357,33 @@ export function Onboarding({
 					>
 						{page.anchor !== "center" && (
 							<svg
+								key={step}
 								className={`onboarding-arrow ${edgeGap / fitScale >= 88 ? "is-outside" : "is-inside"} ${page.anchor === "dock" ? "points-down" : "points-up"}`}
 								viewBox="0 0 112 56"
 								fill="none"
 								aria-hidden="true"
 								focusable="false"
 							>
-								<path d="M104 48 C107 28 80 23 59 24 S23 23 9 7 M9 7 L10 20 M9 7 L22 8" />
+								<motion.path
+									d="M104 48 C107 28 80 23 59 24 S23 23 9 7"
+									initial={reducedMotion ? false : { pathLength: 0 }}
+									animate={{ pathLength: 1 }}
+									transition={{
+										duration: reducedMotion ? 0 : 0.42,
+										delay: reducedMotion ? 0 : 0.16,
+										ease: "easeInOut"
+									}}
+								/>
+								<motion.path
+									d="M10 20 L9 7 L22 8"
+									initial={reducedMotion ? false : { pathLength: 0 }}
+									animate={{ pathLength: 1 }}
+									transition={{
+										duration: reducedMotion ? 0 : 0.14,
+										delay: reducedMotion ? 0 : 0.58,
+										ease: "easeOut"
+									}}
+								/>
 							</svg>
 						)}
 						<div className="onboarding-content">
