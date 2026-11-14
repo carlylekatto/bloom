@@ -5,6 +5,9 @@ welcome → Island introduction → Island visibility → Dock introduction → 
 visibility → volume/brightness introduction → startup/update preferences → finish.
 Introductions and options share a position near the corresponding surface, so each
 page stays short. A single opaque charcoal card keeps the same dimensions throughout.
+Curved arrows point toward the live Island and Dock from outside the card. On
+smaller layouts with less space at the edge, the arrows sit inside the card.
+Their bounds are included in the native window region so they remain visible.
 
 The actual Island or Dock is temporarily revealed during its steps, including in
 Smart or Peek mode. This does not change the saved mode or enable a disabled

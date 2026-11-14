@@ -87,7 +87,7 @@ const STEPS: {
 			"That's your Island, up top. Music, quick controls and a moment to focus, all in one place.",
 		anchor: "island",
 		kind: "intro",
-		hint: "Hover over it to open it. Scroll or swipe to switch panels."
+		hint: "Hover to reveal your widgets. Click, swipe or scroll while hovering to open the Island and switch modes."
 	},
 	{
 		title: "Keep it in reach.",
@@ -170,7 +170,13 @@ export function Onboarding({
 			: page.anchor === "dock"
 				? viewport.height - height - edgeGap
 				: (viewport.height - height) / 2;
-	const reportBounds = () => onRegionChange(measureElements([[".onboarding-window", 20]]));
+	const reportBounds = () =>
+		onRegionChange(
+			measureElements([
+				[".onboarding-window", 20],
+				[".onboarding-arrow", 4]
+			])
+		);
 
 	useEffect(() => {
 		alive.current = true;
@@ -199,7 +205,8 @@ export function Onboarding({
 		// clip the card while IPC catches up. Tighten it again once settled.
 		const current = measureElements([[".onboarding-window", 20]])[0];
 		const left = Math.min(current?.x ?? x - 20, x - 20);
-		const top = Math.min(current?.y ?? y - 20, y - 20);
+		const arrowRoom = page.anchor === "center" ? 0 : 60 * fitScale;
+		const top = Math.min(current?.y ?? y - 20, y - 20) - arrowRoom;
 		onRegionChange([
 			{
 				x: left,
@@ -207,7 +214,9 @@ export function Onboarding({
 				width:
 					Math.max(current ? current.x + current.width : x + width + 20, x + width + 20) - left,
 				height:
-					Math.max(current ? current.y + current.height : y + height + 20, y + height + 20) - top
+					Math.max(current ? current.y + current.height : y + height + 20, y + height + 20) +
+					arrowRoom -
+					top
 			}
 		]);
 		// A fixed-size card moves with a transform; text never scales or reflows.
@@ -327,7 +336,9 @@ export function Onboarding({
 				}}
 			>
 				<div className="onboarding-card" style={{ zoom: fitScale }}>
-					<img className="onboarding-watermark" src="/bloom.png" alt="" aria-hidden="true" />
+					<div className="onboarding-watermark-clip" aria-hidden="true">
+						<img className="onboarding-watermark" src="/bloom.png" alt="" />
+					</div>
 					<header className="onboarding-header">
 						<span>bloom</span>
 						<button
@@ -344,6 +355,17 @@ export function Onboarding({
 						initial={{ opacity: 0 }}
 						animate={content}
 					>
+						{page.anchor !== "center" && (
+							<svg
+								className={`onboarding-arrow ${edgeGap / fitScale >= 88 ? "is-outside" : "is-inside"} ${page.anchor === "dock" ? "points-down" : "points-up"}`}
+								viewBox="0 0 112 56"
+								fill="none"
+								aria-hidden="true"
+								focusable="false"
+							>
+								<path d="M104 48 C107 28 80 23 59 24 S23 23 9 7 M9 7 L10 20 M9 7 L22 8" />
+							</svg>
+						)}
 						<div className="onboarding-content">
 							<h1 id="onboarding-title" ref={heading} tabIndex={-1}>
 								{page.title}

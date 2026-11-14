@@ -16,7 +16,7 @@
 	will-change: transform;
 	display: flex;
 	flex-direction: column;
-	overflow: hidden;
+	overflow: visible;
 	pointer-events: auto;
 	border: 1px solid rgba(255, 255, 255, 0.16);
 	border-radius: 24px;
@@ -26,6 +26,44 @@
 		0 24px 70px #00000050;
 	text-align: left;
 	user-select: none;
+}
+.onboarding-watermark-clip {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	border-radius: 24px;
+	pointer-events: none;
+}
+.onboarding-arrow {
+	position: absolute;
+	width: 112px;
+	height: 56px;
+	color: #d3d3d3;
+	pointer-events: none;
+}
+.onboarding-arrow path {
+	stroke: currentColor;
+	stroke-width: 1.6;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+.onboarding-arrow.is-outside.points-up {
+	left: calc(50% + 76px);
+	top: -56px;
+}
+.onboarding-arrow.is-outside.points-down {
+	left: calc(50% - 188px);
+	bottom: -56px;
+	rotate: 180deg;
+}
+.onboarding-arrow.is-inside {
+	right: 24px;
+	top: 65px;
+	width: 32px;
+	height: 28px;
+}
+.onboarding-arrow.is-inside.points-down {
+	rotate: 180deg;
 }
 .onboarding-watermark {
 	position: absolute;
