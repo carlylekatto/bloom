@@ -1712,7 +1712,7 @@ const Dock = memo(function Dock() {
 															<img
 																src={icon}
 																alt={app.name}
-																className={isBloomOrSettings && app.path !== "bloom-settings" ? "bloom-icon-img" : ""}
+																className={icon === "/bloom-settings-sliders.png" ? "bloom-settings-icon" : isBloomOrSettings && app.path !== "bloom-settings" ? "bloom-icon-img" : ""}
 																draggable={false}
 															/>
 														) : (
@@ -1876,7 +1876,7 @@ const Dock = memo(function Dock() {
 													<img
 														src={icon}
 														alt={app.name}
-														className={isBloomOrSettings && app.path !== "bloom-settings" ? "bloom-icon-img" : ""}
+														className={icon === "/bloom-settings-sliders.png" ? "bloom-settings-icon" : isBloomOrSettings && app.path !== "bloom-settings" ? "bloom-icon-img" : ""}
 														draggable={false}
 													/>
 												) : (
