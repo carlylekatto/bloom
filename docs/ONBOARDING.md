@@ -1,8 +1,10 @@
 # First-time setup
 
 Setup and the quick guide use the existing `overlay` webview. The welcome
-introduces the Island and Dock together, followed by separate visibility
-choices, startup/update preferences, and a short guide. New installations start
+opens with a simple welcome, then introduces the Island and Dock on separate
+pages with their visibility choices, followed by startup/update preferences and
+a short guide. The panel is opaque charcoal, and guide cards sit centrally near
+the corresponding screen edge. New installations start
 with Island **Fixed** and Dock **Smart**. Startup and automatic updates are
 explicit choices; replaying setup loads the current choices.
 

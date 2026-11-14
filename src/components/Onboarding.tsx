@@ -3,17 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
-import {
-	ArrowLeft,
-	ArrowRight,
-	Check,
-	ChevronDown,
-	ChevronUp,
-	Music2,
-	Settings2,
-	X
-} from "lucide-react";
-import { EdgeSurface } from "./EdgeSurface";
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, Settings2, X } from "lucide-react";
 import { measureElements, type RegionRect } from "../windowRegion";
 import {
 	onboardingChoices,
@@ -77,38 +67,6 @@ function ModeChoice({
 	);
 }
 
-function DesktopPreview({ island, dock }: { island: SurfaceMode; dock: SurfaceMode }) {
-	return (
-		<div className={`onboarding-desktop island-${island} dock-${dock}`} aria-hidden="true">
-			<div className="onboarding-preview-window">
-				<div />
-				<span />
-				<span />
-			</div>
-			<div className="onboarding-preview-island">
-				<EdgeSurface edge="top" reflective />
-				<img src="/bloom.png" alt="" />
-				<span>9:41</span>
-				<Music2 size={13} />
-			</div>
-			<div className="onboarding-preview-dock">
-				<EdgeSurface edge="bottom" reflective />
-				<img src="/windows-11.png" alt="" />
-				<span className="onboarding-folder" />
-				<span className="onboarding-music">
-					<Music2 size={15} />
-				</span>
-				<span className="onboarding-settings">
-					<Settings2 size={15} />
-				</span>
-			</div>
-			<span className="onboarding-desktop-caption">
-				A little more life. Right where you need it.
-			</span>
-		</div>
-	);
-}
-
 export function Onboarding({
 	scale,
 	onClose,
@@ -127,7 +85,10 @@ export function Onboarding({
 	const heading = useRef<HTMLHeadingElement>(null);
 	const saving = useRef(false);
 	const reducedMotion = useReducedMotion();
-	const isGuide = step >= 3;
+	const guideStart = 4;
+	const lastStep = 6;
+	const preferencesStep = 3;
+	const isGuide = step >= guideStart;
 	const fitScale = Math.min(scale, (viewport.width - 40) / 720, (viewport.height - 40) / 510);
 	const reportBounds = () => onRegionChange(measureElements([[".onboarding-window", 20]]));
 
@@ -190,7 +151,7 @@ export function Onboarding({
 					await emit("autostart-changed", wanted);
 				}
 			});
-			if (tour) setStep(3);
+			if (tour) setStep(guideStart);
 			else await onClose();
 		} catch (reason) {
 			setError(`Couldn't finish saving. Please try again. ${String(reason)}`);
@@ -201,16 +162,18 @@ export function Onboarding({
 	};
 
 	const titles = [
-		"Your desktop is waiting.",
-		"Make room for your day.",
-		"Keep it blooming.",
+		"Welcome to Bloom.",
 		"Meet the Island.",
+		"Meet the Dock.",
+		"Keep it blooming.",
+		"Always within reach.",
 		"A taskbar that moves.",
 		"Your desktop. Your rules."
 	];
 	const descriptions = [
-		"This wakes it up.",
-		"Two surfaces. Each with its own rhythm.",
+		"Bloom makes your Windows desktop feel alive.",
+		"Your music, quick controls and focus tools. Together at the top of your screen.",
+		"A new home for your apps, in place of the Windows taskbar.",
 		"A few small things, your way.",
 		"Your music, quick controls and a moment to focus.",
 		"Your apps, a little closer.",
@@ -218,7 +181,9 @@ export function Onboarding({
 	];
 
 	return (
-		<div className={`onboarding-root ${isGuide ? `onboarding-tour tour-${step}` : ""}`}>
+		<div
+			className={`onboarding-root ${isGuide ? `onboarding-tour tour-${step - guideStart}` : step === 0 ? "onboarding-welcome" : ""}`}
+		>
 			<motion.section
 				ref={panel}
 				className={`onboarding-window ${isGuide ? "is-guide" : ""}`}
@@ -282,7 +247,9 @@ export function Onboarding({
 							}}
 						>
 							{isGuide && (
-								<span className="onboarding-eyebrow">A quick look · {step - 2} of 3</span>
+								<span className="onboarding-eyebrow">
+									A quick look · {step - guideStart + 1} of 3
+								</span>
 							)}
 							<h1 id="onboarding-title" ref={heading} tabIndex={-1}>
 								{titles[step]}
@@ -290,7 +257,6 @@ export function Onboarding({
 							<p id="onboarding-description" className="onboarding-description">
 								{descriptions[step]}
 							</p>
-							{step === 0 && <DesktopPreview island="fixed" dock="smart" />}
 							{step === 1 && choices && (
 								<div className="onboarding-mode-choices">
 									<ModeChoice
@@ -298,6 +264,10 @@ export function Onboarding({
 										value={choices.island}
 										onChange={(island) => setChoices({ ...choices, island })}
 									/>
+								</div>
+							)}
+							{step === 2 && choices && (
+								<div className="onboarding-mode-choices">
 									<ModeChoice
 										surface="dock"
 										value={choices.dock}
@@ -305,7 +275,7 @@ export function Onboarding({
 									/>
 								</div>
 							)}
-							{step === 2 && choices && (
+							{step === preferencesStep && choices && (
 								<div className="onboarding-preferences">
 									<label>
 										<span>
@@ -339,7 +309,7 @@ export function Onboarding({
 									<p>You can change all of this in Settings.</p>
 								</div>
 							)}
-							{step === 3 && (
+							{step === 4 && (
 								<div className="onboarding-guide-copy">
 									<ChevronUp size={22} aria-hidden="true" />
 									<p>
@@ -349,7 +319,7 @@ export function Onboarding({
 									</p>
 								</div>
 							)}
-							{step === 4 && (
+							{step === 5 && (
 								<div className="onboarding-guide-copy">
 									<ChevronDown size={22} aria-hidden="true" />
 									<p>
@@ -359,7 +329,7 @@ export function Onboarding({
 									</p>
 								</div>
 							)}
-							{step === 5 && (
+							{step === 6 && (
 								<div className="onboarding-guide-copy">
 									<Settings2 size={22} aria-hidden="true" />
 									<p>
@@ -385,17 +355,17 @@ export function Onboarding({
 				<footer className="onboarding-footer">
 					<div
 						className="onboarding-progress"
-						aria-label={`${isGuide ? "Guide" : "Setup"} step ${isGuide ? step - 2 : step + 1} of 3`}
+						aria-label={`${isGuide ? "Guide" : "Setup"} step ${isGuide ? step - guideStart + 1 : step + 1} of ${isGuide ? 3 : guideStart}`}
 					>
-						{[0, 1, 2].map((index) => (
+						{Array.from({ length: isGuide ? 3 : guideStart }, (_, index) => index).map((index) => (
 							<span
 								key={index}
-								className={index === (isGuide ? step - 3 : step) ? "current" : ""}
+								className={index === (isGuide ? step - guideStart : step) ? "current" : ""}
 							/>
 						))}
 					</div>
 					<div className="onboarding-actions">
-						{step > 0 && step !== 3 && (
+						{step > 0 && step !== guideStart && (
 							<button
 								type="button"
 								className="onboarding-back"
@@ -406,7 +376,7 @@ export function Onboarding({
 								<ArrowLeft size={16} />
 							</button>
 						)}
-						{step === 2 ? (
+						{step === preferencesStep ? (
 							<>
 								<button
 									type="button"
@@ -440,10 +410,14 @@ export function Onboarding({
 									type="button"
 									className="onboarding-primary"
 									disabled={busy || !choices}
-									onClick={() => (step === 5 ? void dismiss() : setStep(step + 1))}
+									onClick={() => (step === lastStep ? void dismiss() : setStep(step + 1))}
 								>
-									{step === 0 ? "Get started" : step === 5 ? "Start using Bloom" : "Continue"}
-									{step !== 5 && <ArrowRight size={15} />}
+									{step === 0
+										? "Get started"
+										: step === lastStep
+											? "Start using Bloom"
+											: "Continue"}
+									{step !== lastStep && <ArrowRight size={15} />}
 								</button>
 							</>
 						)}
