@@ -252,11 +252,26 @@
 	display: flex;
 	align-items: center;
 	gap: 16px;
-	padding: 17px 0;
+	padding: 8px 0;
+	min-height: 42px;
 	cursor: pointer;
 }
 .onboarding-preferences > label + label {
 	border-top: 1px solid #ffffff10;
+}
+.onboarding-preferences select {
+	max-width: 200px;
+	padding: 6px 10px;
+	border: 1px solid #ffffff25;
+	border-radius: 8px;
+	background: #292929;
+	color: inherit;
+	font: inherit;
+	font-size: 12px;
+}
+.onboarding-preferences select:focus-visible {
+	outline: 2px solid #8fb7fa;
+	outline-offset: 3px;
 }
 .onboarding-preferences label > span:first-child {
 	flex: 1;

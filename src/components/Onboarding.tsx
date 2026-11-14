@@ -83,11 +83,10 @@ const STEPS: {
 	},
 	{
 		title: "Meet the Island.",
-		description:
-			"That's your Island, up top. Music, quick controls and a moment to focus, all in one place.",
+		description: "Music, widgets and quick controls, together at the top of your screen.",
 		anchor: "island",
 		kind: "intro",
-		hint: "Hover to reveal your widgets. Click, swipe or scroll while hovering to open the Island and switch modes."
+		hint: "Hover for widgets. While hovering, click, swipe or scroll to open and switch modes. Command Center has quick controls and Settings."
 	},
 	{
 		title: "Keep it in reach.",
@@ -117,7 +116,7 @@ const STEPS: {
 	},
 	{
 		title: "Make yourself at home.",
-		description: "Two small choices before you go.",
+		description: "A few small choices, your way.",
 		anchor: "center",
 		kind: "preferences"
 	},
@@ -126,7 +125,7 @@ const STEPS: {
 		description: "Bloom is already working. Go on, try it out.",
 		anchor: "center",
 		kind: "finish",
-		hint: "Right-click the Dock for Bloom Options. Quit Bloom to bring back your Windows taskbar."
+		hint: "Open Settings from Command Center or right-click the Dock for Bloom Options. Quit Bloom to restore the Windows taskbar."
 	}
 ];
 const CARD_WIDTH = 500;
@@ -143,6 +142,7 @@ export function Onboarding({
 }) {
 	const [step, setStep] = useState(0);
 	const [choices, setChoices] = useState<OnboardingChoices | null>(null);
+	const [themeMode, setThemeMode] = useState("dark");
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
 	const [viewport, setViewport] = useState(() => ({ width: innerWidth, height: innerHeight }));
@@ -183,7 +183,15 @@ export function Onboarding({
 		let disposed = false;
 		Promise.all([invoke<Record<string, unknown>>("load_settings"), isEnabled()])
 			.then(([settings, autostart]) => {
-				if (!disposed) setChoices(onboardingChoices(settings, autostart));
+				if (!disposed) {
+					setChoices(onboardingChoices(settings, autostart));
+					const theme = settings["bloom-theme-mode"];
+					setThemeMode(
+						typeof theme === "string" && ["dark", "light", "custom", "adaptive"].includes(theme)
+							? theme
+							: "dark"
+					);
+				}
 			})
 			.catch((reason) => {
 				if (!disposed) setError(`Couldn't load setup: ${String(reason)}`);
@@ -272,6 +280,23 @@ export function Onboarding({
 		}
 	};
 
+	const changeAppearance = async (value: string) => {
+		if (saving.current) return;
+		saving.current = true;
+		setBusy(true);
+		setError("");
+		try {
+			await invoke("save_setting", { key: "bloom-theme-mode", value });
+			setThemeMode(value);
+			localStorage.setItem("bloom-theme-mode", value);
+		} catch (reason) {
+			setError(`Couldn't change appearance. Please try again. ${String(reason)}`);
+		} finally {
+			saving.current = false;
+			setBusy(false);
+		}
+	};
+
 	const save = async () => {
 		if (!choices || saving.current) return;
 		saving.current = true;
@@ -318,7 +343,7 @@ export function Onboarding({
 					if (event.key !== "Tab") return;
 					const controls = Array.from(
 						panel.current?.querySelectorAll<HTMLElement>(
-							"button:not(:disabled), input:not(:disabled), [href]"
+							"button:not(:disabled), input:not(:disabled), select:not(:disabled), [href]"
 						) ?? []
 					).filter((el) => el.getClientRects().length > 0);
 					const first = controls[0];
@@ -380,7 +405,7 @@ export function Onboarding({
 									animate={{ pathLength: 1 }}
 									transition={{
 										duration: reducedMotion ? 0 : 0.08,
-										delay: reducedMotion ? 0 : 0.30,
+										delay: reducedMotion ? 0 : 0.3,
 										ease: "easeOut"
 									}}
 								/>
@@ -410,10 +435,24 @@ export function Onboarding({
 							)}
 							{page.kind === "preferences" && choices && (
 								<div className="onboarding-preferences">
+									<label htmlFor="onboarding-appearance">
+										<span>Appearance</span>
+										<select
+											id="onboarding-appearance"
+											value={themeMode}
+											disabled={busy}
+											onChange={(event) => void changeAppearance(event.target.value)}
+										>
+											<option value="dark">Dark</option>
+											<option value="light">Light</option>
+											{themeMode === "custom" && <option value="custom">Custom (current)</option>}
+											{themeMode === "adaptive" && (
+												<option value="adaptive">Adaptive Accent (current)</option>
+											)}
+										</select>
+									</label>
 									<label>
-										<span>
-											Start with Windows<small>Ready when you sign in.</small>
-										</span>
+										<span>Start with Windows</span>
 										<input
 											type="checkbox"
 											role="switch"
@@ -426,9 +465,7 @@ export function Onboarding({
 										<span className="onboarding-toggle" aria-hidden="true" />
 									</label>
 									<label>
-										<span>
-											Automatic updates<small>Install stable updates when they're ready.</small>
-										</span>
+										<span>Automatic updates</span>
 										<input
 											type="checkbox"
 											role="switch"
