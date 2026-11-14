@@ -21,13 +21,13 @@ const MODES: { value: SurfaceMode; label: string }[] = [
 const EXPLANATIONS = {
 	island: {
 		fixed: "Stays visible, with your clock and quick information in reach.",
-		smart: "Moves aside when a window overlaps it. Return to the top edge to reveal it.",
-		peek: "Waits at the top edge. Move there to reveal it."
+		smart: "Moves aside when a window overlaps it.\nReturn to the top edge to reveal it.",
+		peek: "Waits at the top edge.\nMove there to reveal it."
 	},
 	dock: {
 		fixed: "Stays visible and reserves space beneath your windows.",
-		smart: "Moves aside when a window overlaps it. Return to the bottom edge to reveal it.",
-		peek: "Waits at the bottom edge. Move there to reveal it."
+		smart: "Moves aside when a window overlaps it.\nReturn to the bottom edge to reveal it.",
+		peek: "Waits at the bottom edge.\nMove there to reveal it."
 	}
 };
 
@@ -73,7 +73,7 @@ const STEPS: {
 	description: string;
 	anchor: TourAnchor;
 	kind: "welcome" | "intro" | "island-mode" | "dock-mode" | "controls" | "preferences" | "finish";
-	hint?: string;
+	hints?: string[];
 }[] = [
 	{
 		title: "Welcome to Bloom.",
@@ -86,7 +86,11 @@ const STEPS: {
 		description: "Music, widgets and quick controls, together at the top of your screen.",
 		anchor: "island",
 		kind: "intro",
-		hint: "Hover for widgets. While hovering, click, swipe or scroll to open and switch modes. Command Center has quick controls and Settings."
+		hints: [
+			"Hover to reveal widgets.",
+			"While hovering, click, swipe or scroll to open and switch modes.",
+			"Find quick controls and Settings in Command Center."
+		]
 	},
 	{
 		title: "Keep it in reach.",
@@ -99,7 +103,7 @@ const STEPS: {
 		description: "Your apps live down here now, in place of the Windows taskbar.",
 		anchor: "dock",
 		kind: "intro",
-		hint: "Hover for window previews. Drag your apps to reorder them."
+		hints: ["Hover for window previews.", "Drag your apps to reorder them."]
 	},
 	{
 		title: "Give your apps some space.",
@@ -112,7 +116,7 @@ const STEPS: {
 		description: "Bloom brings volume and brightness controls to the sides of your screen.",
 		anchor: "center",
 		kind: "controls",
-		hint: "Use your keyboard controls as usual. Edge hover is available in Settings."
+		hints: ["Use your keyboard controls as usual.", "Enable edge hover in Settings."]
 	},
 	{
 		title: "Make yourself at home.",
@@ -125,7 +129,11 @@ const STEPS: {
 		description: "Bloom is already working. Go on, try it out.",
 		anchor: "center",
 		kind: "finish",
-		hint: "Open Settings from Command Center or right-click the Dock for Bloom Options. Quit Bloom to restore the Windows taskbar."
+		hints: [
+			"Open Settings from Command Center.",
+			"Or right-click the Dock for Bloom Options.",
+			"Quit Bloom to restore the Windows taskbar."
+		]
 	}
 ];
 const CARD_WIDTH = 500;
@@ -418,7 +426,13 @@ export function Onboarding({
 							<p id="onboarding-description" className="onboarding-description">
 								{page.description}
 							</p>
-							{page.hint && <p className="onboarding-hint">{page.hint}</p>}
+							{page.hints && (
+								<div className="onboarding-hint">
+									{page.hints.map((hint) => (
+										<p key={hint}>{hint}</p>
+									))}
+								</div>
+							)}
 							{choices && (page.kind === "island-mode" || page.kind === "dock-mode") && (
 								<div className="onboarding-mode-choices">
 									<ModeChoice

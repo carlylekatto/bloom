@@ -130,6 +130,7 @@
 	margin: 0 0 12px;
 }
 .onboarding-description {
+	text-wrap: pretty;
 	font-size: 14px;
 	line-height: 1.5;
 	color: #bdbdbd;
@@ -239,6 +240,8 @@
 		inset 0 1px 0 #ffffff0e;
 }
 .onboarding-mode-group > p {
+	text-wrap: pretty;
+	white-space: pre-line;
 	color: #ababab;
 	font-size: 11px;
 	line-height: 1.45;
@@ -349,9 +352,15 @@
 .onboarding-hint {
 	color: #adadad;
 	font-size: 13px;
-	line-height: 1.65;
-	margin-top: 24px;
-	max-width: 38ch;
+	line-height: 1.5;
+	margin-top: 20px;
+	text-wrap: pretty;
+}
+.onboarding-hint > p {
+	margin: 0;
+}
+.onboarding-hint > p + p {
+	margin-top: 8px;
 }
 .is-welcome .onboarding-content {
 	display: flex;
