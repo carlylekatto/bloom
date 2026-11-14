@@ -10,9 +10,10 @@
 	color-scheme: dark;
 }
 .onboarding-window {
-	position: relative;
-	width: 720px;
-	height: 510px;
+	position: absolute;
+	left: 0;
+	top: 0;
+	will-change: transform;
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
@@ -40,7 +41,7 @@
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	padding: 23px 27px;
+	padding: 17px 23px;
 }
 .onboarding-header > span {
 	font-size: 21px;
@@ -81,10 +82,10 @@
 	position: relative;
 	flex: 1;
 	min-height: 0;
-	padding: 38px 76px 0 130px;
+	padding: 16px 32px 0;
 }
 .onboarding-content h1 {
-	font-size: 29px;
+	font-size: 27px;
 	line-height: 1.16;
 	font-weight: 600;
 	letter-spacing: -0.9px;
@@ -102,21 +103,13 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 23px 28px;
-	min-height: 84px;
+	padding: 19px 24px;
+	min-height: 74px;
 }
 .onboarding-progress {
-	display: flex;
-	gap: 8px;
-}
-.onboarding-progress span {
-	height: 6px;
-	width: 6px;
-	border-radius: 50%;
-	background: #ffffff30;
-}
-.onboarding-progress span.current {
-	background: #f3f3f3;
+	font-size: 11px;
+	color: #9d9d9d;
+	font-variant-numeric: tabular-nums;
 }
 .onboarding-actions {
 	display: flex;
@@ -151,7 +144,7 @@
 	text-decoration: underline;
 }
 .onboarding-mode-choices {
-	margin-top: 38px;
+	margin-top: 28px;
 	display: grid;
 	gap: 16px;
 }
@@ -216,7 +209,7 @@
 	margin: 8px 0 0;
 }
 .onboarding-preferences {
-	margin-top: 32px;
+	margin-top: 14px;
 }
 .onboarding-preferences > label {
 	display: flex;
@@ -272,7 +265,7 @@
 .onboarding-preferences > p {
 	font-size: 10px;
 	color: #ababab;
-	margin-top: 38px;
+	margin-top: 28px;
 }
 .onboarding-error {
 	font-size: 11px;
@@ -288,72 +281,40 @@
 	color: #bcbcbc;
 	margin-top: 18px;
 }
-.onboarding-tour .onboarding-window {
-	width: 440px;
-	height: auto;
-	min-height: 300px;
-	position: absolute;
-}
-.onboarding-tour .onboarding-content {
-	padding: 5px 30px 14px;
-}
-.onboarding-tour .onboarding-content h1 {
-	font-size: 25px;
-}
-.onboarding-tour .onboarding-header {
-	padding: 16px 23px;
-}
-.onboarding-tour .onboarding-header > span {
-	font-size: 16px;
-}
-.onboarding-tour .onboarding-watermark {
-	width: 300px;
-	height: 300px;
-	left: -174px;
-	bottom: -130px;
-}
-.onboarding-eyebrow {
-	display: block;
-	color: #aaaaaa;
-	font-size: 10px;
-	margin-bottom: 12px;
-}
-.onboarding-guide-copy {
+.onboarding-card {
+	position: relative;
+	width: 500px;
+	height: 400px;
 	display: flex;
-	gap: 13px;
-	align-items: center;
-	margin-top: 21px;
-	color: #c4c4c4;
+	flex-direction: column;
 }
-.onboarding-guide-copy > svg {
-	flex: none;
-	color: #b0b0b0;
+.onboarding-page {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
 }
-.onboarding-guide-copy > p {
-	font-size: 12px;
-	line-height: 1.7;
+.onboarding-hint {
+	color: #adadad;
+	font-size: 13px;
+	line-height: 1.65;
+	margin-top: 24px;
+	max-width: 38ch;
 }
-.tour-0 .onboarding-window {
-	top: 80px;
-}
-.onboarding-tour .onboarding-window {
-	left: 50%;
-	translate: -50% 0;
-}
-.tour-1 .onboarding-window,
-.tour-2 .onboarding-window {
-	bottom: 100px;
-}
-.onboarding-welcome .onboarding-content {
-	display: grid;
-	place-content: center;
-	padding: 0 60px 36px;
+.is-welcome .onboarding-content {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
 	text-align: center;
+	padding: 0 36px 12px;
 }
-.onboarding-welcome .onboarding-content h1 {
-	font-size: 42px;
-	letter-spacing: -1.5px;
-	margin-bottom: 17px;
+.is-welcome .onboarding-content h1 {
+	font-size: 32px;
+	letter-spacing: -1.1px;
+}
+.is-welcome .onboarding-hint {
+	font-size: 11px;
+	margin: 22px auto 0;
 }
 @media (prefers-reduced-motion: reduce) {
 	.onboarding-root *,

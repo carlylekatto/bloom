@@ -1,18 +1,27 @@
 # First-time setup
 
-Setup and the quick guide use the existing `overlay` webview. The welcome
-opens with a simple welcome, then introduces the Island and Dock on separate
-pages with their visibility choices, followed by startup/update preferences and
-a short guide. The panel is opaque charcoal, and guide cards sit centrally near
-the corresponding screen edge. New installations start
-with Island **Fixed** and Dock **Smart**. Startup and automatic updates are
-explicit choices; replaying setup loads the current choices.
+The existing `overlay` webview hosts one walkthrough of the live desktop:
+welcome → Island introduction → Island visibility → Dock introduction → Dock
+visibility → volume/brightness introduction → startup/update preferences → finish.
+Introductions and options share a position near the corresponding surface, so each
+page stays short. A single opaque charcoal card keeps the same dimensions throughout.
+
+The actual Island or Dock is temporarily revealed during its steps, including in
+Smart or Peek mode. This does not change the saved mode or enable a disabled
+component. Leaving those steps or closing the walkthrough restores normal hiding.
+
+New installations select Island **Fixed** and Dock **Smart**. Startup and automatic
+updates remain explicit choices; replay loads the current configuration.
 
 Open **Settings → General → Welcome to Bloom → Open setup** to replay it.
-No localStorage edits or settings reset are necessary. Choices are drafts until
-**Show me around** or **I'll explore** saves them. Closing setup before saving
-keeps the existing configuration. Closing or skipping dismisses automatic setup;
-the replay action remains available.
+Choices remain drafts until **Continue** on the preferences page saves them.
+Closing or skipping before that leaves the saved choices alone. The finish page
+invites the user to try the already-running desktop.
+
+Content fades out in place before changing pages. The card moves using a transform,
+without resizing, and new text fades in without vertical movement. The window region
+covers its travel path during motion and tightens afterward. Reduced motion removes
+both the movement and fades; keyboard focus never scrolls the outgoing text.
 
 ## Lifecycle
 
@@ -37,8 +46,9 @@ the preceding foreground window when available.
 ## Manual verification
 
 1. Run `bun run tauri dev`, open Settings, and use **Open setup**.
-2. Check both visibility selectors, save preferences, and finish the three guide
-   cards. Verify Island and Dock respond to the saved modes.
+2. Follow the live Island and Dock introductions, check both visibility selectors,
+   save preferences, and finish. Verify the chosen modes apply and temporary
+   reveals end when leaving each surface.
 3. Replay setup and confirm it reflects the saved choices. Close with Escape and
    confirm keyboard focus and normal volume/brightness overlays recover.
 4. Check a smaller screen and Windows scaling above 100%, including larger Bloom

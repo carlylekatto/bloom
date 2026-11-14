@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { motion, useAnimation, useReducedMotion } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
-import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, Settings2, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, X } from "lucide-react";
 import { measureElements, type RegionRect } from "../windowRegion";
 import {
 	onboardingChoices,
@@ -67,6 +67,71 @@ function ModeChoice({
 	);
 }
 
+type TourAnchor = "center" | "island" | "dock";
+const STEPS: {
+	title: string;
+	description: string;
+	anchor: TourAnchor;
+	kind: "welcome" | "intro" | "island-mode" | "dock-mode" | "controls" | "preferences" | "finish";
+	hint?: string;
+}[] = [
+	{
+		title: "Welcome to Bloom.",
+		description: "Bloom makes your Windows desktop feel alive.",
+		anchor: "center",
+		kind: "welcome"
+	},
+	{
+		title: "Meet the Island.",
+		description:
+			"That's your Island, up top. Music, quick controls and a moment to focus, all in one place.",
+		anchor: "island",
+		kind: "intro",
+		hint: "Hover over it to open it. Scroll or swipe to switch panels."
+	},
+	{
+		title: "Keep it in reach.",
+		description: "Choose when your Island stays on screen.",
+		anchor: "island",
+		kind: "island-mode"
+	},
+	{
+		title: "Meet the Dock.",
+		description: "Your apps live down here now, in place of the Windows taskbar.",
+		anchor: "dock",
+		kind: "intro",
+		hint: "Hover for window previews. Drag your apps to reorder them."
+	},
+	{
+		title: "Give your apps some space.",
+		description: "Choose when your Dock stays on screen.",
+		anchor: "dock",
+		kind: "dock-mode"
+	},
+	{
+		title: "A little less interruption.",
+		description: "Bloom brings volume and brightness controls to the sides of your screen.",
+		anchor: "center",
+		kind: "controls",
+		hint: "Use your keyboard controls as usual. Edge hover is available in Settings."
+	},
+	{
+		title: "Make yourself at home.",
+		description: "Two small choices before you go.",
+		anchor: "center",
+		kind: "preferences"
+	},
+	{
+		title: "Already blooming.",
+		description: "Bloom is already working. Go on, try it out.",
+		anchor: "center",
+		kind: "finish",
+		hint: "Right-click the Dock for Bloom Options. Quit Bloom to bring back your Windows taskbar."
+	}
+];
+const CARD_WIDTH = 500;
+const CARD_HEIGHT = 400;
+
 export function Onboarding({
 	scale,
 	onClose,
@@ -84,15 +149,31 @@ export function Onboarding({
 	const panel = useRef<HTMLElement>(null);
 	const heading = useRef<HTMLHeadingElement>(null);
 	const saving = useRef(false);
+	const navigation = useRef(0);
+	const alive = useRef(true);
+	const initialized = useRef(false);
 	const reducedMotion = useReducedMotion();
-	const guideStart = 4;
-	const lastStep = 6;
-	const preferencesStep = 3;
-	const isGuide = step >= guideStart;
-	const fitScale = Math.min(scale, (viewport.width - 40) / 720, (viewport.height - 40) / 510);
+	const shell = useAnimation();
+	const content = useAnimation();
+	const page = STEPS[step];
+	const fitScale = Math.max(
+		0.4,
+		Math.min(scale, (viewport.width - 40) / CARD_WIDTH, (viewport.height - 160) / CARD_HEIGHT)
+	);
+	const width = CARD_WIDTH * fitScale;
+	const height = CARD_HEIGHT * fitScale;
+	const x = (viewport.width - width) / 2;
+	const edgeGap = Math.min(96 * fitScale, (viewport.height - height) / 2);
+	const y =
+		page.anchor === "island"
+			? edgeGap
+			: page.anchor === "dock"
+				? viewport.height - height - edgeGap
+				: (viewport.height - height) / 2;
 	const reportBounds = () => onRegionChange(measureElements([[".onboarding-window", 20]]));
 
 	useEffect(() => {
+		alive.current = true;
 		let disposed = false;
 		Promise.all([invoke<Record<string, unknown>>("load_settings"), isEnabled()])
 			.then(([settings, autostart]) => {
@@ -104,22 +185,69 @@ export function Onboarding({
 		const resize = () => setViewport({ width: innerWidth, height: innerHeight });
 		window.addEventListener("resize", resize);
 		return () => {
+			alive.current = false;
 			disposed = true;
+			navigation.current++;
 			window.removeEventListener("resize", resize);
+			void emit("onboarding-surface", "none").catch(console.error);
 		};
 	}, []);
 
 	useLayoutEffect(() => {
-		heading.current?.focus();
-		reportBounds();
-		const frame = requestAnimationFrame(reportBounds);
-		const observer = new ResizeObserver(reportBounds);
-		if (panel.current) observer.observe(panel.current);
-		return () => {
-			cancelAnimationFrame(frame);
-			observer.disconnect();
-		};
-	}, [step, viewport, fitScale]);
+		const generation = navigation.current;
+		// Admit the whole travel path before moving, so the native region cannot
+		// clip the card while IPC catches up. Tighten it again once settled.
+		const current = measureElements([[".onboarding-window", 20]])[0];
+		const left = Math.min(current?.x ?? x - 20, x - 20);
+		const top = Math.min(current?.y ?? y - 20, y - 20);
+		onRegionChange([
+			{
+				x: left,
+				y: top,
+				width:
+					Math.max(current ? current.x + current.width : x + width + 20, x + width + 20) - left,
+				height:
+					Math.max(current ? current.y + current.height : y + height + 20, y + height + 20) - top
+			}
+		]);
+		// A fixed-size card moves with a transform; text never scales or reflows.
+		if (!initialized.current || reducedMotion) {
+			shell.set({ x, y, opacity: 1 });
+			initialized.current = true;
+		} else {
+			void shell.start({
+				x,
+				y,
+				opacity: 1,
+				transition: { duration: 0.36, ease: [0.22, 1, 0.36, 1] }
+			});
+		}
+		void content
+			.start({
+				opacity: 1,
+				transition: { duration: reducedMotion ? 0 : 0.16, delay: reducedMotion ? 0 : 0.12 }
+			})
+			.then(() => {
+				if (alive.current && generation === navigation.current)
+					heading.current?.focus({ preventScroll: true });
+			});
+		if (reducedMotion) reportBounds();
+	}, [step, x, y, reducedMotion, shell, content]);
+
+	useEffect(() => {
+		// Reveal the actual surface during its introduction, without changing its mode.
+		void emit("onboarding-surface", page.anchor).catch(console.error);
+	}, [page.anchor]);
+
+	const navigate = async (next: number) => {
+		if (saving.current || next < 0 || next >= STEPS.length) return;
+		const generation = ++navigation.current;
+		await content.start({ opacity: 0, transition: { duration: reducedMotion ? 0 : 0.1 } });
+		if (alive.current && generation === navigation.current) {
+			setError("");
+			setStep(next);
+		}
+	};
 
 	const dismiss = async () => {
 		if (saving.current) return;
@@ -135,7 +263,7 @@ export function Onboarding({
 		}
 	};
 
-	const save = async (tour: boolean) => {
+	const save = async () => {
 		if (!choices || saving.current) return;
 		saving.current = true;
 		setBusy(true);
@@ -151,8 +279,8 @@ export function Onboarding({
 					await emit("autostart-changed", wanted);
 				}
 			});
-			if (tour) setStep(guideStart);
-			else await onClose();
+			saving.current = false;
+			await navigate(step + 1);
 		} catch (reason) {
 			setError(`Couldn't finish saving. Please try again. ${String(reason)}`);
 		} finally {
@@ -161,40 +289,17 @@ export function Onboarding({
 		}
 	};
 
-	const titles = [
-		"Welcome to Bloom.",
-		"Meet the Island.",
-		"Meet the Dock.",
-		"Keep it blooming.",
-		"Always within reach.",
-		"A taskbar that moves.",
-		"Your desktop. Your rules."
-	];
-	const descriptions = [
-		"Bloom makes your Windows desktop feel alive.",
-		"Your music, quick controls and focus tools. Together at the top of your screen.",
-		"A new home for your apps, in place of the Windows taskbar.",
-		"A few small things, your way.",
-		"Your music, quick controls and a moment to focus.",
-		"Your apps, a little closer.",
-		"Everything can change. You're in control."
-	];
-
 	return (
-		<div
-			className={`onboarding-root ${isGuide ? `onboarding-tour tour-${step - guideStart}` : step === 0 ? "onboarding-welcome" : ""}`}
-		>
+		<div className="onboarding-root">
 			<motion.section
 				ref={panel}
-				className={`onboarding-window ${isGuide ? "is-guide" : ""}`}
-				style={{ zoom: Math.max(0.5, fitScale) }}
+				className="onboarding-window"
+				style={{ width, height }}
 				role="dialog"
-				aria-modal="true"
 				aria-labelledby="onboarding-title"
 				aria-describedby="onboarding-description"
-				initial={reducedMotion ? false : { opacity: 0, y: 14, scale: 0.97 }}
-				animate={{ opacity: 1, y: 0, scale: 1 }}
-				transition={{ type: "spring", stiffness: 330, damping: 32 }}
+				initial={{ x, y, opacity: 0 }}
+				animate={shell}
 				onAnimationComplete={reportBounds}
 				onKeyDown={(event) => {
 					if (event.key === "Escape") {
@@ -221,70 +326,56 @@ export function Onboarding({
 					}
 				}}
 			>
-				<img className="onboarding-watermark" src="/bloom.png" alt="" aria-hidden="true" />
-				<header className="onboarding-header">
-					<span>bloom</span>
-					<button
-						type="button"
-						aria-label="Close setup"
-						disabled={busy}
-						onClick={() => void dismiss()}
-					>
-						<X size={17} />
-					</button>
-				</header>
-				<div className="onboarding-content">
-					<AnimatePresence mode="wait" initial={false}>
-						<motion.div
-							key={step}
-							initial={reducedMotion ? false : { opacity: 0, y: 8 }}
-							animate={{ opacity: 1, y: 0 }}
-							exit={{ opacity: 0, y: reducedMotion ? 0 : -5 }}
-							transition={{ duration: reducedMotion ? 0 : 0.16 }}
-							onAnimationComplete={() => {
-								heading.current?.focus();
-								reportBounds();
-							}}
+				<div className="onboarding-card" style={{ zoom: fitScale }}>
+					<img className="onboarding-watermark" src="/bloom.png" alt="" aria-hidden="true" />
+					<header className="onboarding-header">
+						<span>bloom</span>
+						<button
+							type="button"
+							aria-label="Close setup"
+							disabled={busy}
+							onClick={() => void dismiss()}
 						>
-							{isGuide && (
-								<span className="onboarding-eyebrow">
-									A quick look · {step - guideStart + 1} of 3
-								</span>
-							)}
+							<X size={17} />
+						</button>
+					</header>
+					<motion.div
+						className={`onboarding-page ${page.kind === "welcome" || page.kind === "finish" ? "is-welcome" : ""}`}
+						initial={{ opacity: 0 }}
+						animate={content}
+					>
+						<div className="onboarding-content">
 							<h1 id="onboarding-title" ref={heading} tabIndex={-1}>
-								{titles[step]}
+								{page.title}
 							</h1>
 							<p id="onboarding-description" className="onboarding-description">
-								{descriptions[step]}
+								{page.description}
 							</p>
-							{step === 1 && choices && (
+							{page.hint && <p className="onboarding-hint">{page.hint}</p>}
+							{choices && (page.kind === "island-mode" || page.kind === "dock-mode") && (
 								<div className="onboarding-mode-choices">
 									<ModeChoice
-										surface="island"
-										value={choices.island}
-										onChange={(island) => setChoices({ ...choices, island })}
+										surface={page.kind === "island-mode" ? "island" : "dock"}
+										value={page.kind === "island-mode" ? choices.island : choices.dock}
+										onChange={(value) =>
+											setChoices({
+												...choices,
+												[page.kind === "island-mode" ? "island" : "dock"]: value
+											})
+										}
 									/>
 								</div>
 							)}
-							{step === 2 && choices && (
-								<div className="onboarding-mode-choices">
-									<ModeChoice
-										surface="dock"
-										value={choices.dock}
-										onChange={(dock) => setChoices({ ...choices, dock })}
-									/>
-								</div>
-							)}
-							{step === preferencesStep && choices && (
+							{page.kind === "preferences" && choices && (
 								<div className="onboarding-preferences">
 									<label>
 										<span>
-											Start with Windows
-											<small>A familiar desktop, from the moment you sign in.</small>
+											Start with Windows<small>Ready when you sign in.</small>
 										</span>
 										<input
 											type="checkbox"
 											role="switch"
+											disabled={busy}
 											checked={choices.autostart}
 											onChange={(event) =>
 												setChoices({ ...choices, autostart: event.target.checked })
@@ -299,6 +390,7 @@ export function Onboarding({
 										<input
 											type="checkbox"
 											role="switch"
+											disabled={busy}
 											checked={choices.autoUpdate}
 											onChange={(event) =>
 												setChoices({ ...choices, autoUpdate: event.target.checked })
@@ -306,123 +398,71 @@ export function Onboarding({
 										/>
 										<span className="onboarding-toggle" aria-hidden="true" />
 									</label>
-									<p>You can change all of this in Settings.</p>
 								</div>
 							)}
-							{step === 4 && (
-								<div className="onboarding-guide-copy">
-									<ChevronUp size={22} aria-hidden="true" />
-									<p>
-										Hover at the top to open it.
-										<br />
-										Scroll or swipe to switch panels.
-									</p>
-								</div>
+							{!choices && !error && (
+								<p className="onboarding-status" role="status">
+									Getting things ready…
+								</p>
 							)}
-							{step === 5 && (
-								<div className="onboarding-guide-copy">
-									<ChevronDown size={22} aria-hidden="true" />
-									<p>
-										Find your apps at the bottom edge.
-										<br />
-										Hover for previews. Drag to reorder.
-									</p>
-								</div>
+							{error && (
+								<p className="onboarding-error" role="alert">
+									{error}
+								</p>
 							)}
-							{step === 6 && (
-								<div className="onboarding-guide-copy">
-									<Settings2 size={22} aria-hidden="true" />
-									<p>
-										Right-click the Dock for Bloom Options.
-										<br />
-										Quit Bloom to restore your Windows taskbar.
-									</p>
-								</div>
-							)}
-						</motion.div>
-					</AnimatePresence>
-					{!choices && !error && (
-						<p className="onboarding-status" role="status">
-							Getting things ready…
-						</p>
-					)}
-					{error && (
-						<p className="onboarding-error" role="alert">
-							{error}
-						</p>
-					)}
-				</div>
-				<footer className="onboarding-footer">
-					<div
-						className="onboarding-progress"
-						aria-label={`${isGuide ? "Guide" : "Setup"} step ${isGuide ? step - guideStart + 1 : step + 1} of ${isGuide ? 3 : guideStart}`}
-					>
-						{Array.from({ length: isGuide ? 3 : guideStart }, (_, index) => index).map((index) => (
+						</div>
+						<footer className="onboarding-footer">
 							<span
-								key={index}
-								className={index === (isGuide ? step - guideStart : step) ? "current" : ""}
-							/>
-						))}
-					</div>
-					<div className="onboarding-actions">
-						{step > 0 && step !== guideStart && (
-							<button
-								type="button"
-								className="onboarding-back"
-								aria-label="Previous step"
-								disabled={busy}
-								onClick={() => setStep(step - 1)}
+								className="onboarding-progress"
+								aria-label={`Step ${step + 1} of ${STEPS.length}`}
 							>
-								<ArrowLeft size={16} />
-							</button>
-						)}
-						{step === preferencesStep ? (
-							<>
-								<button
-									type="button"
-									className="onboarding-link"
-									disabled={busy || !choices}
-									onClick={() => void save(false)}
-								>
-									I'll explore
-								</button>
-								<button
-									type="button"
-									className="onboarding-primary"
-									disabled={busy || !choices}
-									onClick={() => void save(true)}
-								>
-									{busy ? "Saving…" : "Show me around"}
-									<ArrowRight size={15} />
-								</button>
-							</>
-						) : (
-							<>
-								<button
-									type="button"
-									className="onboarding-link"
-									disabled={busy}
-									onClick={() => void dismiss()}
-								>
-									{isGuide ? "Skip tour" : "Set up later"}
-								</button>
+								{step + 1} / {STEPS.length}
+							</span>
+							<div className="onboarding-actions">
+								{step > 0 && (
+									<button
+										type="button"
+										className="onboarding-back"
+										aria-label="Previous step"
+										disabled={busy}
+										onClick={() => void navigate(step - 1)}
+									>
+										<ArrowLeft size={16} />
+									</button>
+								)}
+								{page.kind !== "finish" && (
+									<button
+										type="button"
+										className="onboarding-link"
+										disabled={busy}
+										onClick={() => void dismiss()}
+									>
+										Skip
+									</button>
+								)}
 								<button
 									type="button"
 									className="onboarding-primary"
 									disabled={busy || !choices}
-									onClick={() => (step === lastStep ? void dismiss() : setStep(step + 1))}
+									onClick={() => {
+										if (page.kind === "finish") void dismiss();
+										else if (page.kind === "preferences") void save();
+										else void navigate(step + 1);
+									}}
 								>
-									{step === 0
-										? "Get started"
-										: step === lastStep
-											? "Start using Bloom"
-											: "Continue"}
-									{step !== lastStep && <ArrowRight size={15} />}
+									{busy
+										? "Saving…"
+										: page.kind === "welcome"
+											? "Show me around"
+											: page.kind === "finish"
+												? "Let's bloom"
+												: "Continue"}
+									{page.kind !== "finish" && <ArrowRight size={15} />}
 								</button>
-							</>
-						)}
-					</div>
-				</footer>
+							</div>
+						</footer>
+					</motion.div>
+				</div>
 			</motion.section>
 		</div>
 	);
