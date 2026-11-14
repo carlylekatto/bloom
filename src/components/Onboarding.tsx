@@ -8,7 +8,7 @@ import { measureElements, type RegionRect } from "../windowRegion";
 import { hexToHsl } from "../theme";
 import {
 	onboardingChoices,
-	saveOnboardingChoices,
+	saveOnboardingChoice,
 	type OnboardingChoices,
 	type SurfaceMode
 } from "../onboardingState";
@@ -35,10 +35,12 @@ const EXPLANATIONS = {
 function ModeChoice({
 	surface,
 	value,
+	disabled,
 	onChange
 }: {
 	surface: "island" | "dock";
 	value: SurfaceMode;
+	disabled: boolean;
 	onChange: (mode: SurfaceMode) => void;
 }) {
 	const defaultMode = surface === "island" ? "fixed" : "smart";
@@ -53,6 +55,7 @@ function ModeChoice({
 					<label key={option.value} className={value === option.value ? "selected" : ""}>
 						<input
 							type="radio"
+							disabled={disabled}
 							name={`onboarding-${surface}`}
 							value={option.value}
 							checked={value === option.value}
@@ -262,8 +265,10 @@ export function Onboarding({
 
 	useEffect(() => {
 		// Reveal the actual surface during its introduction, without changing its mode.
-		void emit("onboarding-surface", page.anchor).catch(console.error);
-	}, [page.anchor]);
+		void emit("onboarding-surface", page.kind === "intro" ? page.anchor : "none").catch(
+			console.error
+		);
+	}, [page.anchor, page.kind]);
 
 	const navigate = async (next: number) => {
 		if (saving.current || next < 0 || next >= STEPS.length) return;
@@ -317,13 +322,16 @@ export function Onboarding({
 		}
 	};
 
-	const save = async () => {
+	const changeChoice = async <K extends keyof OnboardingChoices>(
+		key: K,
+		value: OnboardingChoices[K]
+	) => {
 		if (!choices || saving.current) return;
 		saving.current = true;
 		setBusy(true);
 		setError("");
 		try {
-			await saveOnboardingChoices(choices, {
+			await saveOnboardingChoice(key, value, {
 				saveSetting: async (key, value) => {
 					await invoke("save_setting", { key, value });
 					localStorage.setItem(key, value);
@@ -333,8 +341,7 @@ export function Onboarding({
 					await emit("autostart-changed", wanted);
 				}
 			});
-			saving.current = false;
-			await navigate(step + 1);
+			setChoices((current) => (current ? { ...current, [key]: value } : current));
 		} catch (reason) {
 			setError(`Couldn't finish saving. Please try again. ${String(reason)}`);
 		} finally {
@@ -450,11 +457,9 @@ export function Onboarding({
 									<ModeChoice
 										surface={page.kind === "island-mode" ? "island" : "dock"}
 										value={page.kind === "island-mode" ? choices.island : choices.dock}
+										disabled={busy}
 										onChange={(value) =>
-											setChoices({
-												...choices,
-												[page.kind === "island-mode" ? "island" : "dock"]: value
-											})
+											void changeChoice(page.kind === "island-mode" ? "island" : "dock", value)
 										}
 									/>
 								</div>
@@ -482,9 +487,7 @@ export function Onboarding({
 											role="switch"
 											disabled={busy}
 											checked={choices.autostart}
-											onChange={(event) =>
-												setChoices({ ...choices, autostart: event.target.checked })
-											}
+											onChange={(event) => void changeChoice("autostart", event.target.checked)}
 										/>
 										<span className="onboarding-toggle" aria-hidden="true" />
 									</label>
@@ -495,9 +498,7 @@ export function Onboarding({
 											role="switch"
 											disabled={busy}
 											checked={choices.autoUpdate}
-											onChange={(event) =>
-												setChoices({ ...choices, autoUpdate: event.target.checked })
-											}
+											onChange={(event) => void changeChoice("autoUpdate", event.target.checked)}
 										/>
 										<span className="onboarding-toggle" aria-hidden="true" />
 									</label>
@@ -549,7 +550,6 @@ export function Onboarding({
 									disabled={busy || !choices}
 									onClick={() => {
 										if (page.kind === "finish") void dismiss();
-										else if (page.kind === "preferences") void save();
 										else void navigate(step + 1);
 									}}
 								>

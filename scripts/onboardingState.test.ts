@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { onboardingChoices, saveOnboardingChoices } from "../src/onboardingState";
+import { onboardingChoices, saveOnboardingChoice } from "../src/onboardingState";
 
 test("new installs select Fixed Island and Smart Dock without opting into updates or startup", () => {
 	expect(onboardingChoices({}, false)).toEqual({
@@ -22,28 +22,32 @@ test("replaying setup keeps existing choices and handles legacy modes", () => {
 	).toBe("fixed");
 });
 
-test("saves string settings and leaves startup to its plugin", async () => {
+test("each live choice saves only its setting; startup uses the plugin", async () => {
 	const writes: string[][] = [];
-	await saveOnboardingChoices(onboardingChoices({}, false), {
-		saveSetting: async (key, value) => {
+	const operations = {
+		saveSetting: async (key: string, value: string) => {
 			writes.push([key, value]);
 		},
-		setAutostart: async (value) => {
+		setAutostart: async (value: boolean) => {
 			writes.push(["autostart-plugin", String(value)]);
 		}
-	});
-	expect(writes).toEqual([
-		["bloom-notch-mode", "fixed"],
-		["bloom-dock-mode", "smart"],
-		["bloom-auto-update", "false"],
-		["autostart-plugin", "false"]
+	};
+	await saveOnboardingChoice("dock", "peek", operations);
+	expect(writes).toEqual([["bloom-dock-mode", "peek"]]);
+	await saveOnboardingChoice("island", "smart", operations);
+	await saveOnboardingChoice("autoUpdate", true, operations);
+	await saveOnboardingChoice("autostart", true, operations);
+	expect(writes.slice(1)).toEqual([
+		["bloom-notch-mode", "smart"],
+		["bloom-auto-update", "true"],
+		["autostart-plugin", "true"]
 	]);
 });
 
-test("a failed setting save stops the remaining setup changes", async () => {
+test("live save errors propagate without modifying unrelated choices", async () => {
 	let calledPlugin = false;
 	await expect(
-		saveOnboardingChoices(onboardingChoices({}, true), {
+		saveOnboardingChoice("dock", "fixed", {
 			saveSetting: async () => {
 				throw new Error("read-only settings");
 			},
@@ -53,4 +57,14 @@ test("a failed setting save stops the remaining setup changes", async () => {
 		})
 	).rejects.toThrow("read-only settings");
 	expect(calledPlugin).toBe(false);
+	await expect(
+		saveOnboardingChoice("autostart", true, {
+			saveSetting: async () => {
+				throw new Error("unexpected setting write");
+			},
+			setAutostart: async () => {
+				throw new Error("startup denied");
+			}
+		})
+	).rejects.toThrow("startup denied");
 });

@@ -24,15 +24,22 @@ export function onboardingChoices(
 	};
 }
 
-export async function saveOnboardingChoices(
-	choices: OnboardingChoices,
+export async function saveOnboardingChoice<K extends keyof OnboardingChoices>(
+	key: K,
+	value: OnboardingChoices[K],
 	operations: {
 		saveSetting: (key: string, value: string) => Promise<void>;
 		setAutostart: (enabled: boolean) => Promise<void>;
 	}
 ) {
-	await operations.saveSetting("bloom-notch-mode", choices.island);
-	await operations.saveSetting("bloom-dock-mode", choices.dock);
-	await operations.saveSetting("bloom-auto-update", String(choices.autoUpdate));
-	await operations.setAutostart(choices.autostart);
+	if (key === "autostart") {
+		await operations.setAutostart(value as boolean);
+		return;
+	}
+	const settingKeys = {
+		island: "bloom-notch-mode",
+		dock: "bloom-dock-mode",
+		autoUpdate: "bloom-auto-update"
+	};
+	await operations.saveSetting(settingKeys[key as keyof typeof settingKeys], String(value));
 }

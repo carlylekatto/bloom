@@ -11,24 +11,26 @@ Curved arrows point toward the live Island and Dock from outside the card. On
 smaller layouts with less space at the edge, the arrows sit inside the card.
 Their bounds are included in the native window region so they remain visible.
 
-The actual Island or Dock is temporarily revealed during its steps, including in
+The actual Island or Dock is temporarily revealed during its introduction, including in
 Smart or Peek mode. This does not change the saved mode or enable a disabled
-component. Leaving those steps or closing the walkthrough restores normal hiding.
+component. The visibility-options screens use normal hiding so mode changes can be tested live.
+Leaving the introduction or closing the walkthrough restores normal hiding.
 
 New installations select Island **Fixed** and Dock **Smart**. Startup and automatic
 updates remain explicit choices; replay loads the current configuration.
 
 Open **Settings → General → Welcome to Bloom → Open setup** to replay it.
-Visibility, startup and update choices remain drafts until **Continue** on the
-preferences page saves them. The compact Dark/Light/Adaptive Color choice applies
-immediately to the live desktop. Replaying setup preserves an existing Custom or
-Adaptive Accent theme until a different appearance is explicitly selected.
-Choosing Adaptive Color seeds saturation and brightness from the Windows accent,
-matching the Settings appearance selector. Custom Color remains available in Settings.
+All choices apply immediately: visibility uses the normal settings/event path,
+startup uses the autostart plugin, and automatic updates use the persisted updater
+preference. Failed changes leave the selected value unchanged and show an error.
+Skipping or closing the walkthrough keeps choices already applied.
+
+The compact Dark/Light/Adaptive Color choice also applies immediately. Replaying
+setup preserves an existing Custom or Adaptive Accent theme until another mode is
+explicitly selected. Adaptive Color seeds saturation and brightness from the Windows
+accent, matching Settings. Custom Color remains available in Settings.
 Command Center and its Settings shortcut are introduced in the Island copy;
 the finish page also explains the Dock context-menu route to Settings.
-Closing or skipping before that leaves the saved choices alone. The finish page
-invites the user to try the already-running desktop.
 
 Content fades out in place before changing pages. The card moves using a transform,
 without resizing, and new text fades in without vertical movement. The window region
