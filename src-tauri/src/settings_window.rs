@@ -5,6 +5,21 @@ use tauri::{AppHandle, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
 
 static CREATION_LOCK: Mutex<()> = Mutex::new(());
 
+fn settings_icon() -> Result<tauri::image::Image<'static>, String> {
+    tauri::image::Image::from_bytes(include_bytes!("../../public/bloom-settings-sliders.png"))
+        .map_err(|e| e.to_string())
+}
+
+/// Use the internal launch target for our own settings HWND, never a title match.
+pub fn identify_running_window(app: &mut crate::types::AppInfo, settings_hwnd: Option<isize>) {
+    if settings_hwnd.is_some() && app.hwnd == settings_hwnd {
+        app.path = "bloom-settings".into();
+        app.name = "Settings".into();
+        app.executable = None;
+        app.icon = None;
+    }
+}
+
 pub fn with_window<R: Runtime, T>(
     app: &AppHandle<R>,
     action: impl FnOnce(&WebviewWindow<R>, bool) -> T,
@@ -15,6 +30,9 @@ pub fn with_window<R: Runtime, T>(
         return Err("Bloom is shutting down".into());
     }
     if let Some(window) = app.get_webview_window("settings") {
+        window
+            .set_icon(settings_icon()?)
+            .map_err(|e| e.to_string())?;
         return Ok(action(&window, false));
     }
     let config = app
@@ -25,6 +43,8 @@ pub fn with_window<R: Runtime, T>(
         .find(|window| window.label == "settings")
         .ok_or_else(|| "Missing settings window template".to_string())?;
     let window = WebviewWindowBuilder::from_config(app, config)
+        .map_err(|e| e.to_string())?
+        .icon(settings_icon()?)
         .map_err(|e| e.to_string())?
         .build()
         .map_err(|e| e.to_string())?;
@@ -54,6 +74,40 @@ pub fn close<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn running_settings_uses_its_pin_identity_without_matching_other_windows() {
+        let mut settings = crate::types::AppInfo {
+            name: "Bloom Settings".into(),
+            path: "C:\\Apps\\bloom.exe".into(),
+            icon: Some("old executable icon".into()),
+            is_running: true,
+            hwnd: Some(42),
+            executable: Some("bloom.exe".into()),
+            all_hwnds: None,
+        };
+        let mut other = settings.clone();
+        other.hwnd = Some(43);
+        identify_running_window(&mut other, Some(42));
+        assert_eq!(other.path, "C:\\Apps\\bloom.exe");
+        identify_running_window(&mut settings, Some(42));
+        assert_eq!(settings.path, "bloom-settings");
+        assert_eq!(settings.name, "Settings");
+        assert!(settings.executable.is_none());
+        assert!(settings.icon.is_none());
+        assert_eq!(settings.hwnd, Some(42));
+        assert!(settings.is_running);
+        identify_running_window(&mut other, None);
+        assert_eq!(other.path, "C:\\Apps\\bloom.exe");
+    }
+
+    #[test]
+    fn settings_window_icon_has_visible_pixels_and_transparent_padding() {
+        let icon = settings_icon().unwrap();
+        assert!(icon.width() > 0 && icon.height() > 0);
+        assert!(icon.rgba().chunks_exact(4).any(|pixel| pixel[3] == 0));
+        assert!(icon.rgba().chunks_exact(4).any(|pixel| pixel[3] == 255));
+    }
 
     #[test]
     fn closed_settings_does_not_load_a_webview_at_startup() {

@@ -844,8 +844,12 @@ fn launch_path(path: &str) {
 }
 
 #[tauri::command]
-pub async fn get_active_windows() -> Vec<AppInfo> {
+pub async fn get_active_windows(app: AppHandle) -> Vec<AppInfo> {
     tauri::async_runtime::spawn_blocking(move || {
+        let settings_hwnd = app
+            .get_webview_window("settings")
+            .and_then(|window| window.hwnd().ok())
+            .map(|hwnd| hwnd.0 as isize);
         use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
         // COM is required while enumerating: each window's AppUserModelID is read
         // through the shell property store.
@@ -861,7 +865,8 @@ pub async fn get_active_windows() -> Vec<AppInfo> {
 
         let mut grouped: HashMap<String, AppInfo> = HashMap::new();
 
-        for app in apps {
+        for mut app in apps {
+            crate::settings_window::identify_running_window(&mut app, settings_hwnd);
             let path = app.path.to_lowercase();
             let name = app.name.to_lowercase();
 
