@@ -1,4 +1,14 @@
-import { Power, Download, Clock, BatteryWarning, RefreshCw, RotateCcw, LogOut } from "lucide-react";
+import { useState } from "react";
+import {
+	Power,
+	Download,
+	Clock,
+	BatteryWarning,
+	RefreshCw,
+	RotateCcw,
+	LogOut,
+	Compass
+} from "lucide-react";
 import { SettingRow } from "./SettingRow";
 
 interface GeneralTabProps {
@@ -13,6 +23,7 @@ interface GeneralTabProps {
 	restartBloom: () => void;
 	resetToDefaults: () => void;
 	quitBloom: () => void;
+	openOnboarding: () => Promise<void>;
 }
 
 export function GeneralTab({
@@ -26,8 +37,11 @@ export function GeneralTab({
 	handleThresholdChange,
 	restartBloom,
 	resetToDefaults,
-	quitBloom
+	quitBloom,
+	openOnboarding
 }: GeneralTabProps) {
+	const [setupError, setSetupError] = useState("");
+	const [openingSetup, setOpeningSetup] = useState(false);
 	return (
 		<>
 			<div className="setting-group-label">System</div>
@@ -77,6 +91,31 @@ export function GeneralTab({
 
 			<div className="setting-group-label">App</div>
 			<div className="setting-group">
+				<SettingRow icon={Compass} label="Welcome to Bloom" desc="Replay setup and the quick guide">
+					<button
+						type="button"
+						className="onboarding-settings-launch"
+						disabled={openingSetup}
+						onClick={async () => {
+							setOpeningSetup(true);
+							setSetupError("");
+							try {
+								await openOnboarding();
+							} catch (error) {
+								setSetupError(String(error));
+							} finally {
+								setOpeningSetup(false);
+							}
+						}}
+					>
+						Open setup
+					</button>
+				</SettingRow>
+				{setupError && (
+					<p className="onboarding-settings-error" role="alert">
+						{setupError}
+					</p>
+				)}
 				<SettingRow
 					icon={RotateCcw}
 					label="Reset to Defaults"

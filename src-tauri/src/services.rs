@@ -3563,7 +3563,14 @@ fn process_mouse_position(app_handle: &AppHandle, cursor: windows::Win32::Founda
 
         // --- Overlay cursor passthrough ---
         if let Some(ov_win) = app_handle.get_webview_window("overlay") {
-            if fg_fs {
+            if ONBOARDING_ACTIVE.load(Ordering::Relaxed) {
+                // Setup owns keyboard and pointer input only inside its reported
+                // window region. Do not reapply NOACTIVATE while it has focus.
+                if let Ok(hwnd) = ov_win.hwnd() {
+                    set_click_through(hwnd, false);
+                }
+                MH_LAST_OV_IGNORE.store(0, Ordering::Relaxed);
+            } else if fg_fs {
                 let prev = MH_LAST_OV_IGNORE.load(Ordering::Relaxed);
                 if let Ok(hwnd) = ov_win.hwnd() {
                     if prev != 1 {
@@ -3937,7 +3944,9 @@ pub fn sync_overlays(app: &AppHandle) {
             let _ = ov_win.set_size(tauri::PhysicalSize::new(size.width, size.height));
         }
         if let Ok(hwnd) = ov_win.hwnd() {
-            re_assert_topmost(hwnd);
+            if !crate::state::ONBOARDING_ACTIVE.load(Ordering::Relaxed) {
+                re_assert_topmost(hwnd);
+            }
         }
     }
 }

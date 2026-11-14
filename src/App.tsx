@@ -1249,11 +1249,7 @@ function App() {
 				if (windowLabel === "main") {
 					const firstRun = localStorage.getItem("bloom-first-run") === null;
 					if (firstRun) {
-						import("@tauri-apps/plugin-autostart").then(({ enable, isEnabled }) => {
-							isEnabled().then((enabled) => {
-								if (!enabled) enable().catch(() => {});
-							});
-						});
+						// Startup is an explicit choice in first-time setup.
 						localStorage.setItem("bloom-first-run", "done");
 					}
 					const rawDockMode = getVal("bloom-dock-mode", "smart") as string;

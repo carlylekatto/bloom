@@ -43,6 +43,12 @@ export function useSettings() {
 		return !saveFailed.current;
 	}, []);
 	const [autostart, setAutostart] = useState(false);
+	useEffect(() => {
+		const unlisten = listen<boolean>("autostart-changed", ({ payload }) => setAutostart(payload));
+		return () => {
+			void unlisten.then((stop) => stop());
+		};
+	}, []);
 	const [weatherEnabled, setWeatherEnabled] = useState(true);
 	const [calendarMondayFirst, setCalendarMondayFirst] = useState(false);
 	const [calendarEnabled, setCalendarEnabled] = useState(true);

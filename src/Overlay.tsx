@@ -15,6 +15,7 @@ import { useMouseSliderDrag } from "./hooks/useMouseSliderDrag";
 import "./Overlay.css";
 import { EdgeSurface } from "./components/EdgeSurface";
 import { initTheme } from "./theme";
+import { Onboarding } from "./components/Onboarding";
 import { createRegionSender, measureElements, type RegionRect } from "./windowRegion";
 
 // ─── Volume Notch ───────────────────────────────────────────────────────────
@@ -320,7 +321,7 @@ function OverlayApp() {
 		return initTheme();
 	}, []);
 
-	type Mode = "idle" | "volume" | "brightness" | "splash" | "updating";
+	type Mode = "idle" | "volume" | "brightness" | "splash" | "updating" | "onboarding";
 	const [mode, setMode] = useState<Mode>("idle");
 	const [updateStatus, setUpdateStatus] = useState<string>("checking");
 	const [updateProgress, setUpdateProgress] = useState(0);
@@ -353,6 +354,47 @@ function OverlayApp() {
 	const hideWindowTimeoutRef = useRef<any>(null);
 	const splashActiveRef = useRef(false);
 	const mixerExpandedRef = useRef(false);
+	const onboardingActiveRef = useRef(false);
+	const onboardingPendingRef = useRef(false);
+	const splashCompletionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	const beginOnboarding = useCallback(async () => {
+		if (onboardingActiveRef.current) return;
+		onboardingActiveRef.current = true;
+		splashActiveRef.current = true;
+		if (timeoutRef.current) clearTimeout(timeoutRef.current);
+		if (hideWindowTimeoutRef.current) clearTimeout(hideWindowTimeoutRef.current);
+		setMode("onboarding");
+		try {
+			await invoke("set_onboarding_active", { active: true });
+		} catch (error) {
+			console.error("Could not open onboarding", error);
+			await invoke("set_onboarding_active", { active: false }).catch(console.error);
+			onboardingActiveRef.current = false;
+			splashActiveRef.current = false;
+			setMode("idle");
+		}
+	}, []);
+
+	const finishOnboarding = useCallback(async () => {
+		await invoke("complete_onboarding");
+		try {
+			await invoke("set_onboarding_active", { active: false }).catch(console.error);
+		} finally {
+			onboardingActiveRef.current = false;
+			splashActiveRef.current = false;
+			setMode("idle");
+		}
+	}, []);
+
+	useEffect(() => {
+		const unlisten = listen("open-onboarding", () => {
+			void beginOnboarding();
+		});
+		return () => {
+			void unlisten.then((stop) => stop());
+		};
+	}, [beginOnboarding]);
 
 	const resetHideTimeout = useCallback(() => {
 		// Keep the notch pinned while the mixer panel is open; it closes on
@@ -403,50 +445,56 @@ function OverlayApp() {
 
 	// ── Splash Detection ──
 	useEffect(() => {
+		let disposed = false;
+		let doneTimer: ReturnType<typeof setTimeout> | undefined;
 		const firstRun = localStorage.getItem("bloom-first-run") === null;
 		const storedVersion = localStorage.getItem("bloom-app-version");
-
-		const showSplash = (version?: string) => {
-			splashActiveRef.current = true;
-			setMode("splash");
-			invoke("set_splash_fullscreen", { fullscreen: true });
-			if (version) localStorage.setItem("bloom-app-version", version);
-			setTimeout(() => emit("splash-done"), 2800);
-		};
-
-		// First run or old version without version key — splash immediately
-		if (firstRun || storedVersion === null) {
-			showSplash();
-			// Still try to store the version in the background
-			getVersion()
-				.then((v) => localStorage.setItem("bloom-app-version", v))
-				.catch(() => {});
-			return;
-		}
-
-		// Has version key — check if it matches
-		getVersion()
-			.then((currentVersion) => {
-				if (storedVersion !== currentVersion) {
-					showSplash(currentVersion);
-				} else {
-					emit("splash-done");
+		void Promise.all([
+			invoke<boolean>("get_onboarding_completed").catch((error) => {
+				console.error("Could not read onboarding state", error);
+				return true;
+			}),
+			getVersion().catch(() => storedVersion)
+		]).then(([completed, currentVersion]) => {
+			if (disposed || onboardingActiveRef.current) return;
+			onboardingPendingRef.current = !completed;
+			if (firstRun || storedVersion === null || storedVersion !== currentVersion) {
+				splashActiveRef.current = true;
+				setMode("splash");
+				void invoke("set_splash_fullscreen", { fullscreen: true });
+				if (currentVersion) localStorage.setItem("bloom-app-version", currentVersion);
+				doneTimer = setTimeout(() => {
+					void emit("splash-done");
+				}, 2800);
+			} else {
+				void emit("splash-done");
+				if (!completed) {
+					onboardingPendingRef.current = false;
+					void beginOnboarding();
 				}
-			})
-			.catch(() => {
-				// Version check failed — let bloom start
-				emit("splash-done");
-			});
-	}, []);
+			}
+		});
+		return () => {
+			disposed = true;
+			if (doneTimer) clearTimeout(doneTimer);
+			if (splashCompletionTimer.current) clearTimeout(splashCompletionTimer.current);
+		};
+	}, [beginOnboarding]);
 
 	const onSplashComplete = useCallback(() => {
 		localStorage.setItem("bloom-first-run", "done");
-		setTimeout(() => {
+		splashCompletionTimer.current = setTimeout(() => {
 			splashActiveRef.current = false;
-			setMode("idle");
-			invoke("set_splash_fullscreen", { fullscreen: false });
+			void invoke("set_splash_fullscreen", { fullscreen: false })
+				.then(() => {
+					if (onboardingPendingRef.current) {
+						onboardingPendingRef.current = false;
+						void beginOnboarding();
+					} else setMode("idle");
+				})
+				.catch(console.error);
 		}, 300);
-	}, []);
+	}, [beginOnboarding]);
 
 	// ── Event Listeners ──
 	useEffect(() => {
@@ -504,6 +552,7 @@ function OverlayApp() {
 		const autoUpdatePromise = listen<{ status: string; progress?: number }>(
 			"auto-update-status",
 			(event) => {
+				if (onboardingActiveRef.current) return;
 				const { status, progress } = event.payload;
 				setUpdateStatus(status);
 				if (progress !== undefined) setUpdateProgress(progress);
@@ -639,7 +688,7 @@ function OverlayApp() {
 	}, []);
 
 	useEffect(() => {
-		if ((mode === "splash" || mode === "updating") && mixerExpanded) {
+		if ((mode === "splash" || mode === "updating" || mode === "onboarding") && mixerExpanded) {
 			collapseMixer();
 		}
 	}, [mode, mixerExpanded, collapseMixer]);
@@ -677,6 +726,7 @@ function OverlayApp() {
 	useEffect(() => {
 		const width = window.innerWidth;
 		const height = window.innerHeight;
+		if (mode === "onboarding") return; // Setup reports its own bounds as steps move.
 		if (mode === "splash" || mode === "updating") {
 			sendOverlayRegion([{ x: 0, y: 0, width, height }]);
 			return;
@@ -705,6 +755,9 @@ function OverlayApp() {
 
 	return (
 		<div className="overlay-container">
+			{mode === "onboarding" && (
+				<Onboarding scale={scale} onClose={finishOnboarding} onRegionChange={sendOverlayRegion} />
+			)}
 			{/* Splash Screen */}
 			<AnimatePresence>
 				{mode === "splash" && (
@@ -761,7 +814,7 @@ function OverlayApp() {
 			</AnimatePresence>
 
 			{/* Volume / Brightness Overlay */}
-			{mode !== "splash" && mode !== "updating" && (
+			{mode !== "splash" && mode !== "updating" && mode !== "onboarding" && (
 				<div
 					style={{
 						zoom: scale,

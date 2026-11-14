@@ -217,6 +217,11 @@ function SettingsApp() {
 							restartBloom={settings.restartBloom}
 							resetToDefaults={settings.resetToDefaults}
 							quitBloom={settings.quitBloom}
+							openOnboarding={async () => {
+								if (!(await flushPendingSaves()))
+									throw new Error("Save your settings successfully before opening setup.");
+								await invoke("open_onboarding");
+							}}
 						/>
 					)}
 					{activeTab === "appearance" && (

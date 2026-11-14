@@ -333,7 +333,11 @@ pub async fn run_startup_check(app: AppHandle) {
     let attempted_recently =
         install_attempted_recently(&read_state(&app), &attempted_version, now_secs());
 
-    if auto_update && release_is_old_enough(&result) && !attempted_recently {
+    if auto_update
+        && !crate::state::ONBOARDING_ACTIVE.load(Ordering::Relaxed)
+        && release_is_old_enough(&result)
+        && !attempted_recently
+    {
         // On Windows this never returns: the installer exits the process.
         if install(&app).await.is_err() {
             let _ = app.emit(

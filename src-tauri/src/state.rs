@@ -57,6 +57,8 @@ pub static OVERLAY_IN_SPLASH: AtomicBool = AtomicBool::new(false);
 /// A volume or brightness HUD card is up in the overlay. Only then are its
 /// edge rects hit-testable; the rest of the time the overlay stays click-through.
 pub static OVERLAY_HUD_UP: AtomicBool = AtomicBool::new(false);
+/// The first-run setup guide is showing, so the desktop is in setup mode.
+pub static ONBOARDING_ACTIVE: AtomicBool = AtomicBool::new(false);
 pub static CURRENT_FOREGROUND_FULLSCREEN: AtomicBool = AtomicBool::new(false);
 pub static CURRENT_FOREGROUND_MAXIMIZED: AtomicBool = AtomicBool::new(false);
 

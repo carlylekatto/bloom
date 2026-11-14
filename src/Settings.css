@@ -1492,3 +1492,27 @@ input:checked + .slider:before {
 	background: rgba(239, 68, 68, 0.25);
 	color: #ef4444;
 }
+
+
+.onboarding-settings-launch {
+	border: 1px solid var(--bloom-border, #ffffff20);
+	border-radius: 8px;
+	background: var(--bloom-group-bg, #ffffff10);
+	color: var(--bloom-text, white);
+	font: inherit;
+	font-size: 11px;
+	padding: 7px 11px;
+	cursor: pointer;
+}
+.onboarding-settings-launch:focus-visible {
+	outline: 2px solid #7aa9fa;
+	outline-offset: 3px;
+}
+.onboarding-settings-launch:disabled {
+	opacity: 0.5;
+}
+.onboarding-settings-error {
+	font-size: 11px;
+	padding: 10px 16px;
+	color: #df7f72;
+}
