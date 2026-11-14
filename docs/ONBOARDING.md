@@ -4,7 +4,9 @@ The existing `overlay` webview hosts one walkthrough of the live desktop:
 welcome → Island introduction → Island visibility → Dock introduction → Dock
 visibility → volume/brightness introduction → appearance/startup/update preferences → finish.
 Introductions and options share a position near the corresponding surface, so each
-page stays short. A single opaque charcoal card keeps the same dimensions throughout.
+page stays short. A single opaque card keeps the same dimensions throughout and
+follows the selected appearance, including light text/control styling and adaptive
+accent colors.
 Curved arrows point toward the live Island and Dock from outside the card. On
 smaller layouts with less space at the edge, the arrows sit inside the card.
 Their bounds are included in the native window region so they remain visible.
@@ -18,9 +20,11 @@ updates remain explicit choices; replay loads the current configuration.
 
 Open **Settings → General → Welcome to Bloom → Open setup** to replay it.
 Visibility, startup and update choices remain drafts until **Continue** on the
-preferences page saves them. The compact Dark/Light appearance choice applies
+preferences page saves them. The compact Dark/Light/Adaptive Color choice applies
 immediately to the live desktop. Replaying setup preserves an existing Custom or
 Adaptive Accent theme until a different appearance is explicitly selected.
+Choosing Adaptive Color seeds saturation and brightness from the Windows accent,
+matching the Settings appearance selector. Custom Color remains available in Settings.
 Command Center and its Settings shortcut are introduced in the Island copy;
 the finish page also explains the Dock context-menu route to Settings.
 Closing or skipping before that leaves the saved choices alone. The finish page

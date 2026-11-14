@@ -5,6 +5,7 @@ import { emit } from "@tauri-apps/api/event";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { ArrowLeft, ArrowRight, Check, X } from "lucide-react";
 import { measureElements, type RegionRect } from "../windowRegion";
+import { hexToHsl } from "../theme";
 import {
 	onboardingChoices,
 	saveOnboardingChoices,
@@ -294,6 +295,17 @@ export function Onboarding({
 		setBusy(true);
 		setError("");
 		try {
+			if (value === "adaptive") {
+				const accent = await invoke<string>("get_system_accent_color");
+				const hsl = hexToHsl(accent);
+				for (const [key, setting] of [
+					["bloom-theme-saturation", String(hsl.s / 100)],
+					["bloom-theme-brightness", String(hsl.l / 100)]
+				]) {
+					await invoke("save_setting", { key, value: setting });
+					localStorage.setItem(key, setting);
+				}
+			}
 			await invoke("save_setting", { key: "bloom-theme-mode", value });
 			setThemeMode(value);
 			localStorage.setItem("bloom-theme-mode", value);
@@ -460,9 +472,7 @@ export function Onboarding({
 											<option value="dark">Dark</option>
 											<option value="light">Light</option>
 											{themeMode === "custom" && <option value="custom">Custom (current)</option>}
-											{themeMode === "adaptive" && (
-												<option value="adaptive">Adaptive Accent (current)</option>
-											)}
+											<option value="adaptive">Adaptive Color</option>
 										</select>
 									</label>
 									<label>

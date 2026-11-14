@@ -1,4 +1,17 @@
 .onboarding-root {
+	--guide-panel: #202020;
+	--guide-text: #f3f3f3;
+	--guide-muted: #b7b7b7;
+	--guide-border: #ffffff29;
+	--guide-control: #292929;
+	--guide-selected: #ffffff17;
+	--guide-hover: #ffffff0e;
+	--guide-primary: #eeeeee;
+	--guide-primary-text: #202020;
+	--guide-primary-hover: #ffffff;
+	--guide-arrow: #d3d3d3;
+	--guide-error: #ffc4b9;
+	--guide-toggle: #686868;
 	position: fixed;
 	inset: 0;
 	display: grid;
@@ -6,7 +19,7 @@
 	pointer-events: none;
 	z-index: 10000;
 	font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
-	color: #f3f3f3;
+	color: var(--guide-text);
 	color-scheme: dark;
 }
 .onboarding-window {
@@ -18,9 +31,9 @@
 	flex-direction: column;
 	overflow: visible;
 	pointer-events: auto;
-	border: 1px solid rgba(255, 255, 255, 0.16);
+	border: 1px solid var(--guide-border);
 	border-radius: 24px;
-	background: #202020;
+	background: var(--guide-panel);
 	box-shadow: inset 0 1px 0 #ffffff0c;
 	text-align: left;
 	user-select: none;
@@ -36,7 +49,7 @@
 	position: absolute;
 	width: 112px;
 	height: 56px;
-	color: #d3d3d3;
+	color: var(--guide-arrow);
 	pointer-events: none;
 }
 .onboarding-arrow path {
@@ -97,13 +110,13 @@
 	width: 30px;
 	height: 30px;
 	background: transparent;
-	color: #c4c4c4;
+	color: var(--guide-muted);
 	border-radius: 50%;
 }
 .onboarding-header button:hover,
 .onboarding-back:hover {
-	background: #ffffff0e;
-	color: white;
+	background: var(--guide-hover);
+	color: var(--guide-text);
 }
 .onboarding-root button:focus-visible,
 .onboarding-segments label:has(input:focus-visible),
@@ -133,7 +146,7 @@
 	text-wrap: pretty;
 	font-size: 14px;
 	line-height: 1.5;
-	color: #bdbdbd;
+	color: var(--guide-muted);
 	margin: 0;
 }
 .onboarding-footer {
@@ -146,7 +159,7 @@
 }
 .onboarding-progress {
 	font-size: 11px;
-	color: #9d9d9d;
+	color: var(--guide-muted);
 	font-variant-numeric: tabular-nums;
 }
 .onboarding-actions {
@@ -159,26 +172,26 @@
 	gap: 12px;
 	align-items: center;
 	justify-content: center;
-	color: #202020;
-	background: #eeeeee;
+	color: var(--guide-primary-text);
+	background: var(--guide-primary);
 	padding: 11px 17px;
 	border-radius: 24px;
 	font-size: 12px !important;
 	font-weight: 600 !important;
 	min-width: 114px;
-	box-shadow: inset 0 1px 0 white;
+	box-shadow: none;
 }
 .onboarding-primary:hover {
-	background: white;
+	background: var(--guide-primary-hover);
 }
 .onboarding-link {
 	background: none;
-	color: #bcbcbc;
+	color: var(--guide-muted);
 	font-size: 12px !important;
 	padding: 6px 0;
 }
 .onboarding-link:hover {
-	color: white;
+	color: var(--guide-text);
 	text-decoration: underline;
 }
 .onboarding-mode-choices {
@@ -202,14 +215,14 @@
 	margin-bottom: 9px;
 }
 .onboarding-mode-group legend span {
-	color: #adadad;
+	color: var(--guide-muted);
 	font-size: 10px;
 	font-weight: 400;
 }
 .onboarding-segments {
 	display: flex;
-	border: 1px solid #ffffff20;
-	background: #00000017;
+	border: 1px solid var(--guide-border);
+	background: var(--guide-control);
 	border-radius: 11px;
 	padding: 3px;
 }
@@ -223,7 +236,7 @@
 	padding: 7px 0;
 	border-radius: 8px;
 	font-size: 12px;
-	color: #bcbcbc;
+	color: var(--guide-muted);
 	cursor: pointer;
 }
 .onboarding-segments input {
@@ -233,8 +246,8 @@
 	height: 1px;
 }
 .onboarding-segments label.selected {
-	color: #f7f7f7;
-	background: #ffffff17;
+	color: var(--guide-text);
+	background: var(--guide-selected);
 	box-shadow:
 		0 1px 4px #0000001c,
 		inset 0 1px 0 #ffffff0e;
@@ -242,7 +255,7 @@
 .onboarding-mode-group > p {
 	text-wrap: pretty;
 	white-space: pre-line;
-	color: #ababab;
+	color: var(--guide-muted);
 	font-size: 11px;
 	line-height: 1.45;
 	min-height: 32px;
@@ -260,14 +273,14 @@
 	cursor: pointer;
 }
 .onboarding-preferences > label + label {
-	border-top: 1px solid #ffffff10;
+	border-top: 1px solid var(--guide-border);
 }
 .onboarding-preferences select {
 	max-width: 200px;
 	padding: 6px 10px;
-	border: 1px solid #ffffff25;
+	border: 1px solid var(--guide-border);
 	border-radius: 8px;
-	background: #292929;
+	background: var(--guide-control);
 	color: inherit;
 	font: inherit;
 	font-size: 12px;
@@ -284,7 +297,7 @@
 	display: block;
 	font-size: 10px;
 	margin-top: 5px;
-	color: #adadad;
+	color: var(--guide-muted);
 }
 .onboarding-preferences input {
 	position: absolute;
@@ -297,7 +310,7 @@
 	width: 35px;
 	height: 20px;
 	border-radius: 20px;
-	background: #686868;
+	background: var(--guide-toggle);
 	padding: 2px;
 	transition: background 0.16s;
 }
@@ -319,12 +332,12 @@
 }
 .onboarding-preferences > p {
 	font-size: 10px;
-	color: #ababab;
+	color: var(--guide-muted);
 	margin-top: 28px;
 }
 .onboarding-error {
 	font-size: 11px;
-	color: #ffc4b9;
+	color: var(--guide-error);
 	margin-top: 13px;
 	line-height: 1.4;
 	max-height: 44px;
@@ -333,7 +346,7 @@
 }
 .onboarding-status {
 	font-size: 12px;
-	color: #bcbcbc;
+	color: var(--guide-muted);
 	margin-top: 18px;
 }
 .onboarding-card {
@@ -350,7 +363,7 @@
 	flex-direction: column;
 }
 .onboarding-hint {
-	color: #adadad;
+	color: var(--guide-muted);
 	font-size: 13px;
 	line-height: 1.5;
 	margin-top: 20px;
@@ -376,6 +389,30 @@
 .is-welcome .onboarding-hint {
 	font-size: 11px;
 	margin: 22px auto 0;
+}
+.light-mode .onboarding-root {
+	--guide-panel: #f5f5f5;
+	--guide-text: #1c1c1e;
+	--guide-muted: #5c5c60;
+	--guide-border: #00000024;
+	--guide-control: #eaeaea;
+	--guide-selected: #ffffff;
+	--guide-hover: #0000000a;
+	--guide-primary: #262626;
+	--guide-primary-text: #fafafa;
+	--guide-primary-hover: #101010;
+	--guide-arrow: #454548;
+	--guide-error: #a83225;
+	--guide-toggle: #a0a0a0;
+	color-scheme: light;
+}
+.light-mode .onboarding-watermark {
+	filter: brightness(0);
+}
+.theme-adaptive .onboarding-root,
+.theme-custom .onboarding-root {
+	/* Keep desktop accent colors, with an opaque panel for legibility. */
+	--guide-panel: rgb(from var(--bloom-bg) r g b / 1);
 }
 @media (prefers-reduced-motion: reduce) {
 	.onboarding-root *,
