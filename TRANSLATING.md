@@ -18,8 +18,8 @@ Both contribution routes below require a free GitHub account. You do not need Gi
 
 This is the easiest route if you want to send words without editing JSON. **No fork is needed.**
 
-1. Search the [open issues](https://github.com/SehajveerSingh2005/bloom/issues) for your language to see whether someone is already working on it. You can coordinate there instead of duplicating their work.
-2. Open a [translation contribution](https://github.com/SehajveerSingh2005/bloom/issues/new?template=translation.yml). Specify your language and region, such as Brazilian or European Portuguese.
+1. Search the [open issues](https://github.com/little-systems/bloom/issues) for your language to see whether someone is already working on it. You can coordinate there instead of duplicating their work.
+2. Open a [translation contribution](https://github.com/little-systems/bloom/issues/new?template=translation.yml). Specify your language and region, such as Brazilian or European Portuguese.
 3. Use the [English phrase reference](docs/TRANSLATION_REFERENCE.md) to choose a small batch. For each entry, give its English text and your translation. Include the reference key when possible, especially if the same word appears in different places.
 4. Submit the issue. A maintainer will review the wording with you and add it to the language file.
 
@@ -53,7 +53,7 @@ If your language is missing, open a translation issue first. A maintainer can cr
 2. Click the pencil icon (**Edit this file**). If GitHub asks, choose **Fork this repository**. GitHub creates or uses a fork under your account as part of this process. You do not need to create one in advance. This is GitHub's [normal file-edit contribution workflow](https://docs.github.com/en/repositories/working-with-files/managing-files/editing-files#editing-files-in-another-users-repository).
 3. Add the entries you translated, keeping the English file's keys and nesting. Edit your language file, **not `en.json`**. Preserve existing translations unless you are intentionally correcting them. Leave untranslated entries out; an empty starter file is `{}`.
 4. Click **Commit changes…** or **Propose changes** (the label depends on GitHub's screen). Add a short description such as `Translate General settings into French`. Save the change on a branch in your fork; a branch keeps this proposed edit together.
-5. Continue through **Propose changes** / **Compare & pull request**, then finish with **Create pull request**. The destination should be `SehajveerSingh2005/bloom`, branch `main`; the source is the branch in your fork. A pull request, or PR, is your request for us to review and include the change. Saving to your fork alone does not update Bloom.
+5. Continue through **Propose changes** / **Compare & pull request**, then finish with **Create pull request**. The destination should be `little-systems/bloom`, branch `main`; the source is the branch in your fork. A pull request, or PR, is your request for us to review and include the change. Saving to your fork alone does not update Bloom.
 6. Include your language and the areas you translated in the PR description. Automated checks will report JSON or placeholder mistakes, and a maintainer can help fix them. If you make follow-up edits, save them to the **same branch in your fork** to update that PR.
 
 You can also fork and clone the project to edit locally if you already know Git. That is optional; the browser steps above are sufficient.

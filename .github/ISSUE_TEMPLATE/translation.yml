@@ -7,9 +7,9 @@ body:
       value: |
         A few phrases are welcome! Bloom uses English for anything not translated yet.
         You need a GitHub account, but no fork, Git, or development tools for this form.
-        Start with the [English phrase reference](https://github.com/SehajveerSingh2005/bloom/blob/main/docs/TRANSLATION_REFERENCE.md), grouped by area.
+        Start with the [English phrase reference](https://github.com/little-systems/bloom/blob/main/docs/TRANSLATION_REFERENCE.md), grouped by area.
         Pick a few phrases or one screen; you do not need to translate everything.
-        See [the translation guide](https://github.com/SehajveerSingh2005/bloom/blob/main/TRANSLATING.md) for both contribution routes.
+        See [the translation guide](https://github.com/little-systems/bloom/blob/main/TRANSLATING.md) for both contribution routes.
   - type: dropdown
     id: contribution
     attributes:
