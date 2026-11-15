@@ -28,6 +28,15 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Check translations
+        run: bun run i18n:check
+
+      - name: Check English phrase reference
+        run: bun run i18n:reference --check
+
+      - name: Test translation fallback
+        run: bun run i18n:test
+
       - name: Build frontend
         run: bun run build
 

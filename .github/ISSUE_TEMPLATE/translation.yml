@@ -1,0 +1,47 @@
+name: Translation contribution
+description: Send translations, correct wording, or offer to review a language. No coding needed.
+title: "Translation: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A few phrases are welcome! Bloom uses English for anything not translated yet.
+        You need a GitHub account, but no fork, Git, or development tools for this form.
+        Start with the [English phrase reference](https://github.com/SehajveerSingh2005/bloom/blob/main/docs/TRANSLATION_REFERENCE.md), grouped by area.
+        Pick a few phrases or one screen; you do not need to translate everything.
+        See [the translation guide](https://github.com/SehajveerSingh2005/bloom/blob/main/TRANSLATING.md) for both contribution routes.
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: What would you like to contribute?
+      options:
+        - Translations
+        - Corrections to existing translations
+        - An offer to translate or review a language
+    validations:
+      required: true
+  - type: input
+    id: language
+    attributes:
+      label: Language
+      description: Include the region when relevant, such as Brazilian or European Portuguese.
+      placeholder: French, Spanish, Brazilian Portuguese…
+    validations:
+      required: true
+  - type: textarea
+    id: translations
+    attributes:
+      label: Translations or corrections
+      description: Copy phrases from the English reference. Include the reference key if possible, your translation, and the screen. Keep placeholders such as {{count}} unchanged. Leave this blank if you are offering help first.
+      placeholder: |
+        Screen: Settings
+        Reference key: common.cancel
+        English: Cancel
+        Translation: Annuler
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Context or review help
+      description: Optional terminology notes, screenshots, or an offer to review this language.

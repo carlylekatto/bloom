@@ -12,7 +12,9 @@
 		"bump": "bun scripts/bump-version.mjs",
 		"release": "bun scripts/release.mjs",
 		"format": "oxfmt && cd src-tauri && cargo fmt",
-		"i18n:check": "bun scripts/i18n-check.mjs"
+		"i18n:check": "bun scripts/i18n-check.ts",
+		"i18n:test": "bun test scripts/i18n.test.ts",
+		"i18n:reference": "bun scripts/i18n-reference.ts"
 	},
 	"dependencies": {
 		"@crabnebula/tauri-plugin-drag": "^2.1.0",
@@ -27,7 +29,9 @@
 		"framer-motion": "^12.43.0",
 		"lucide-react": "^1.47.0",
 		"react": "^19.3.0",
-		"react-dom": "^19.3.0"
+		"react-dom": "^19.3.0",
+		"i18next": "^27.1.1",
+		"react-i18next": "^18.0.1"
 	},
 	"devDependencies": {
 		"@tauri-apps/cli": "~2.12.4",

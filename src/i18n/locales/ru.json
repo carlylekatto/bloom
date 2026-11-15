@@ -53,7 +53,7 @@
 			"time24h": "24-часовой формат",
 			"time24hDesc": "Использовать 24-часовой формат времени",
 			"lowBattery": "Уведомление о низком заряде",
-			"lowBatteryDesc": "Срабатывает при {percent}%",
+			"lowBatteryDesc": "Срабатывает при {{percent}}%",
 			"reset": "Сбросить настройки",
 			"resetDesc": "Вернуть все настройки и перезапустить Bloom",
 			"restart": "Перезапустить Bloom",
@@ -71,15 +71,15 @@
 			"customColor": "Свой цвет темы",
 			"customColorDesc": "Выберите цвет фона интерфейса",
 			"opacity": "Непрозрачность фона",
-			"opacityDesc": "Настройка прозрачности темы ({percent}%)",
+			"opacityDesc": "Настройка прозрачности темы ({{percent}}%)",
 			"saturation": "Насыщенность цвета",
-			"saturationDesc": "Настройка насыщенности цвета темы ({percent}%)",
+			"saturationDesc": "Настройка насыщенности цвета темы ({{percent}}%)",
 			"brightness": "Яркость фона",
-			"brightnessDesc": "Настройка светлоты фона ({percent}%)",
+			"brightnessDesc": "Настройка светлоты фона ({{percent}}%)",
 			"corners": "Скругление углов",
 			"cornersDesc": "Скруглённые верхние углы",
 			"scale": "Масштаб интерфейса",
-			"scaleDesc": "Настройка размера интерфейса ({percent}%)",
+			"scaleDesc": "Настройка размера интерфейса ({{percent}}%)",
 			"decreaseScale": "Уменьшить масштаб",
 			"increaseScale": "Увеличить масштаб"
 		},
@@ -111,7 +111,7 @@
 			"behaviorDesc": "Выберите, как отображается вырез",
 			"peekDelay": "Задержка показа",
 			"peekInstant": "Показывать сразу при касании верхнего края",
-			"peekDelayed": "Удерживайте курсор у верхнего края {ms} мс",
+			"peekDelayed": "Удерживайте курсор у верхнего края {{ms}} мс",
 			"calendar": "Календарь и таймер",
 			"calendarDesc": "Включить продуктивный режим",
 			"timerSound": "Звук таймера",
@@ -150,19 +150,19 @@
 			"brightnessEdgeDesc": "Выезжать справа"
 		},
 		"about": {
-			"version": "Версия {version}",
+			"version": "Версия {{version}}",
 			"madeWith": "Сделано с",
 			"by": "от",
 			"authorTitle": "sehaz на GitHub",
 			"checking": "Проверка...",
-			"available": "Доступно обновление (v{version})",
+			"available": "Доступно обновление (v{{version}})",
 			"upToDate": "У вас последняя версия Bloom",
 			"downloading": "Загрузка обновления...",
 			"installing": "Установка...",
 			"noUpdates": "Обновления не найдены",
 			"check": "Проверить обновления",
 			"installDesc": "Нажмите, чтобы установить и перезапустить",
-			"currentVersion": "Текущая версия v{version}",
+			"currentVersion": "Текущая версия v{{version}}",
 			"autoUpdate": "Автообновление",
 			"autoUpdateDesc": "Автоматически обновляться при запуске",
 			"export": "Экспорт настроек",
@@ -191,7 +191,7 @@
 			"resetIcon": "Сбросить значок",
 			"addApp": "Добавить приложение в док...",
 			"bloomOptions": "Параметры Bloom",
-			"quitApp": "Закрыть {name}"
+			"quitApp": "Закрыть {{name}}"
 		},
 		"options": {
 			"openSettings": "Открыть настройки",
@@ -211,7 +211,7 @@
 			"closeWindow": "Закрыть окно"
 		},
 		"preview": {
-			"imageAlt": "Превью {index}"
+			"imageAlt": "Превью {{index}}"
 		},
 		"toast": {
 			"setIconFailed": "Не удалось установить значок"
@@ -219,7 +219,7 @@
 	},
 	"notch": {
 		"status": {
-			"weatherTooltip": "{condition} — {city}",
+			"weatherTooltip": "{{condition}} — {{city}}",
 			"cpuUsage": "Загрузка ЦП",
 			"ramUsage": "Загрузка ОЗУ",
 			"freeDiskSpace": "Свободное место на диске",
@@ -243,11 +243,11 @@
 			"setDuration": "Задайте время",
 			"timesUp": "Время вышло",
 			"clickToEdit": "Нажмите, чтобы изменить",
-			"endsAt": "до {time}",
-			"pausedEndsAt": "Пауза · до {time}",
+			"endsAt": "до {{time}}",
+			"pausedEndsAt": "Пауза · до {{time}}",
 			"clickToSetDuration": "Нажмите, чтобы задать время",
 			"timerDurationAria": "Задать длительность таймера",
-			"presetMinutes": "{count} мин"
+			"presetMinutes": "{{count}} мин"
 		},
 		"commandCenter": {
 			"toggleHint": "ЛКМ — переключить, ПКМ — настройки",
@@ -257,12 +257,12 @@
 			"connected": "Подключено",
 			"notConnected": "Не подключено",
 			"dockMode": "Режим дока",
-			"cycleDockMode": "Переключить режим дока: {fixed} / {smart} / {peek}",
+			"cycleDockMode": "Переключить режим дока: {{fixed}} / {{smart}} / {{peek}}",
 			"bluetooth": "Bluetooth",
 			"notchMode": "Режим выреза",
-			"cycleNotchMode": "Переключить режим выреза: {fixed} / {smart} / {peek}",
-			"focusDnd": "Фокус / Не беспокоить: {state}",
-			"energySaver": "Энергосбережение: {state} — нажмите, чтобы открыть настройки",
+			"cycleNotchMode": "Переключить режим выреза: {{fixed}} / {{smart}} / {{peek}}",
+			"focusDnd": "Фокус / Не беспокоить: {{state}}",
+			"energySaver": "Энергосбережение: {{state}} — нажмите, чтобы открыть настройки",
 			"systemTray": "Системный трей",
 			"notificationCenter": "Центр уведомлений",
 			"bloomSettings": "Настройки Bloom",
@@ -300,7 +300,7 @@
 		},
 		"update": {
 			"checking": "Проверка обновлений...",
-			"downloading": "Загрузка обновления... {percent}%",
+			"downloading": "Загрузка обновления... {{percent}}%",
 			"installing": "Установка обновления..."
 		}
 	}
