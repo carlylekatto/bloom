@@ -11,17 +11,22 @@ import {
 } from "../agentAlerts";
 import "./AgentAlert.css";
 
+// Fixed asset paths: logo URLs are never built from an agent value, which can
+// come from page input such as the Settings preview picker.
+const AGENT_LOGOS: Record<Agent, { dark: string; light?: string }> = {
+	claude: { dark: "/agents/claude.svg" },
+	codex: { dark: "/agents/codex.svg", light: "/agents/codex-light.svg" },
+	opencode: { dark: "/agents/opencode.svg", light: "/agents/opencode-light.svg" }
+};
+
 export function AgentLogo({ agent }: { agent: Agent }) {
+	const logo = Object.prototype.hasOwnProperty.call(AGENT_LOGOS, agent) ? AGENT_LOGOS[agent] : null;
+	if (!logo) return null;
 	return (
 		<span className={`agent-logo agent-${agent}`} aria-hidden="true">
-			<img className="agent-logo-dark" src={`/agents/${agent}.svg`} alt="" draggable={false} />
-			{agent !== "claude" && (
-				<img
-					className="agent-logo-light"
-					src={`/agents/${agent}-light.svg`}
-					alt=""
-					draggable={false}
-				/>
+			<img className="agent-logo-dark" src={logo.dark} alt="" draggable={false} />
+			{logo.light && (
+				<img className="agent-logo-light" src={logo.light} alt="" draggable={false} />
 			)}
 		</span>
 	);
