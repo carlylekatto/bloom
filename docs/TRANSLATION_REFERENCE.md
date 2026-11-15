@@ -53,6 +53,7 @@ This page is generated from the [current English catalog](../src/i18n/locales/en
 | `settings.tabs.notch` | Notch |
 | `settings.tabs.dock` | Dock |
 | `settings.tabs.overlays` | Overlays |
+| `settings.tabs.integrations` | Integrations |
 | `settings.tabs.about` | About |
 
 ## Settings → Groups
@@ -797,6 +798,7 @@ This page is generated from the [current English catalog](../src/i18n/locales/en
 | `ui.settings.chooseWhatAppearsAtTheTopOfYourScreen` | Choose what appears at the top of your screen. |
 | `ui.settings.shapeTheTaskbarReplacementAroundYourWorkflow` | Shape the taskbar replacement around your workflow. |
 | `ui.settings.keepQuickControlsVisibleOnlyWhenYouNeedThem` | Keep quick controls visible only when you need them. |
+| `ui.settings.connectYourAppsAndServicesToBloom` | Connect your apps and services to Bloom. |
 | `ui.settings.versionUpdatesAndYourSettingsData` | Version, updates and your settings data. |
 | `ui.settings.makeItYours` | Make it yours |
 | `ui.settings.changesCouldNotBeSavedYourSavedSettingsHaveBeen` | Changes could not be saved. Your saved settings have been restored. |
