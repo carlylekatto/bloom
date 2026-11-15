@@ -176,3 +176,22 @@ test("interrupting a pending approval clears the activity", () => {
 	state = receive(state, "s1", "stopped", 5000);
 	expect(state).toEqual(EMPTY_ALERTS);
 });
+
+test("a session whose agent exited stops holding the notch after another finishes", () => {
+	// "old" lost its exit hook while working; "live" then completes a turn.
+	let state = receive(EMPTY_ALERTS, "old", "working");
+	state = receive(state, "live", "working");
+	state = receive(state, "live", "ready", 2000);
+	state = reduce(state, { type: "present", now: 2001 });
+	expect(state.active?.session).toBe("live");
+	state = reduce(state, { type: "finish" });
+	state = reduce(state, { type: "present", now: 6001 });
+	// Without the exit event the orphan comes back as "Thinking".
+	expect(state.active?.session).toBe("old");
+	// Bloom notices the agent process is gone and sends "stopped".
+	state = receive(state, "old", "stopped", 7000);
+	expect(state.active).toBeNull();
+	state = reduce(state, { type: "present", now: 7001 });
+	expect(state.active).toBeNull();
+	expect(state.entries).toHaveLength(0);
+});

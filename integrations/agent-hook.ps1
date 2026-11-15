@@ -2,6 +2,10 @@ param([ValidateSet('claude', 'codex')][string]$Agent)
 # Bloom-owned hook. Always advisory: no approval decisions and no agent output.
 $ErrorActionPreference = 'Stop'
 try {
+    # When the agent launched this hook (Unix ms). Lets Bloom drop events that
+    # arrive after a newer one, since background hooks can finish out of order.
+    $startedAt = $null
+    try { $startedAt = [DateTimeOffset]::new((Get-Process -Id $PID).StartTime).ToUnixTimeMilliseconds() } catch {}
     [System.Net.ServicePointManager]::Expect100Continue = $false
     $eventData = [Console]::In.ReadToEnd() | ConvertFrom-Json
     $activity = $null
@@ -42,6 +46,7 @@ try {
         if ($session) {
             $payload = @{ agent = $Agent; session = [string]$session; project = [string]$project; kind = $kind }
             if ($activity) { $payload.activity = $activity }
+            if ($startedAt) { $payload.at = $startedAt }
             $body = $payload | ConvertTo-Json -Compress
             $bytes = [Text.Encoding]::UTF8.GetBytes($body)
             $request = [Net.HttpWebRequest]::Create("http://127.0.0.1:$($bridge.port)/agent-alert")

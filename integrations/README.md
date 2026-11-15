@@ -24,6 +24,15 @@ need an update. Remote/WSL sessions are not supported by this Windows-local brid
 - Claude Code: `UserPromptSubmit` → working; `PreToolUse` → reading/editing/running;
   `PostToolUse` → thinking; `SessionEnd` → clear. `Stop` → response ready; `PermissionRequest` and permission or
   elicitation `Notification` → attention; `StopFailure` → error.
+  Bloom's Claude hooks run asynchronously, so PowerShell start-up never delays Claude;
+  each event carries its launch time and Bloom ignores events older than the latest
+  one for that session. Connections made before this change show **Update**.
+- Session end: agents often stop exit hooks before they finish, and a crash or a
+  closed terminal sends nothing. Bloom records which agent process sent each
+  session's events (the process that opened the bridge connection, skipping
+  relay shells such as PowerShell, cmd and bash) and clears the session from the
+  notch within a few seconds of that process exiting. The process start time is
+  compared too, so a reused process ID is not mistaken for the same agent.
 - Codex: `UserPromptSubmit` and tool hooks → working; `Stop` → response ready;
   `PermissionRequest` → working (approval may be automatic or manual); `Interrupt` and `SessionEnd` → clear.
 - OpenCode: `session.idle` → response ready; `permission.asked` and

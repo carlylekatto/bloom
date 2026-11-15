@@ -40,6 +40,283 @@ pub struct AgentAlert {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activity: Option<String>,
+    /// When the agent launched the hook (Unix ms). Claude's hooks run in the
+    /// background and can finish out of order; this restores the event order.
+    #[serde(default, skip_serializing)]
+    pub at: Option<u64>,
+}
+
+/// Latest launch time seen per agent session, so a slow background hook
+/// (a late "working") can't overwrite a newer state such as "ready".
+static EVENT_ORDER: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
+
+/// True if this event was launched before one already shown for its session.
+fn is_stale(order: &mut HashMap<String, u64>, session: &str, at: u64) -> bool {
+    if order.get(session).is_some_and(|last| at < *last) {
+        return true;
+    }
+    if order.len() >= 512 && !order.contains_key(session) {
+        order.clear();
+    }
+    order.insert(session.to_string(), at);
+    false
+}
+
+/// The agent process (Claude Code, Codex, OpenCode) a session's events come
+/// from. When it exits the session is over, even if its exit hook never ran:
+/// agents end hooks early on shutdown, and a crash or closed terminal sends nothing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Owner {
+    pid: u32,
+    /// Process creation time (Unix ms); tells a reused process ID apart.
+    started: u64,
+}
+
+/// Sessions whose agent process is known, keyed by `agent:session`.
+static OWNERS: Mutex<Option<HashMap<String, (AgentAlert, Owner)>>> = Mutex::new(None);
+
+/// Processes that only relay a hook (shells), never the agent itself.
+const RELAY_PROCESSES: &[&str] = &[
+    "powershell.exe",
+    "pwsh.exe",
+    "cmd.exe",
+    "bash.exe",
+    "sh.exe",
+    "dash.exe",
+    "zsh.exe",
+    "env.exe",
+];
+
+/// Where an event came from.
+#[derive(Debug, PartialEq)]
+enum Origin {
+    /// The agent process that is still running the session.
+    Agent(Owner),
+    /// Sent through relay shells whose agent has already exited, e.g. a slow
+    /// background hook that finishes after the agent quit: the session is over.
+    Ended,
+    /// Could not be determined; the event is shown but not tracked.
+    Unknown,
+}
+
+/// Walks from the process that sent an event up past relay shells to the
+/// agent. `info` returns (parent pid, exe name, creation time) for a running
+/// process. A parent that is missing, or started after its child (its pid was
+/// reused), means the agent has exited.
+fn find_owner(sender: u32, info: impl Fn(u32) -> Option<(u32, String, u64)>) -> Origin {
+    let Some((mut parent, mut name, mut started)) = info(sender) else {
+        return Origin::Unknown;
+    };
+    let mut pid = sender;
+    for _ in 0..8 {
+        if !RELAY_PROCESSES.contains(&name.to_ascii_lowercase().as_str()) {
+            return if pid > 4 {
+                Origin::Agent(Owner { pid, started })
+            } else {
+                Origin::Unknown
+            };
+        }
+        match info(parent) {
+            Some((next_parent, next_name, next_started)) if next_started <= started => {
+                (pid, parent, name, started) = (parent, next_parent, next_name, next_started);
+            }
+            _ => return Origin::Ended,
+        }
+    }
+    Origin::Unknown
+}
+
+/// Registers or forgets the owner of an event's session. Returns true if the
+/// session is now tracked.
+fn track_owner(
+    owners: &mut HashMap<String, (AgentAlert, Owner)>,
+    alert: &AgentAlert,
+    owner: Option<Owner>,
+) -> bool {
+    let key = format!("{}:{}", alert.agent, alert.session);
+    if alert.kind == "resolved" || alert.kind == "stopped" {
+        owners.remove(&key);
+        return false;
+    }
+    let Some(owner) = owner else { return false };
+    if owners.len() >= 256 && !owners.contains_key(&key) {
+        return false;
+    }
+    let mut stopped = alert.clone();
+    stopped.kind = "stopped".into();
+    stopped.activity = None;
+    stopped.at = None;
+    owners.insert(key, (stopped, owner));
+    true
+}
+
+/// Removes sessions whose agent process has exited and returns a "stopped"
+/// event for each.
+fn take_ended(
+    owners: &mut HashMap<String, (AgentAlert, Owner)>,
+    alive: impl Fn(Owner) -> bool,
+) -> Vec<AgentAlert> {
+    let ended: Vec<String> = owners
+        .iter()
+        .filter(|(_, (_, owner))| !alive(*owner))
+        .map(|(key, _)| key.clone())
+        .collect();
+    ended
+        .into_iter()
+        .filter_map(|key| owners.remove(&key).map(|(alert, _)| alert))
+        .collect()
+}
+
+fn filetime_to_unix_ms(time: windows::Win32::Foundation::FILETIME) -> u64 {
+    let ticks = ((time.dwHighDateTime as u64) << 32) | time.dwLowDateTime as u64;
+    (ticks / 10_000).saturating_sub(11_644_473_600_000)
+}
+
+/// Creation time (Unix ms) of a running process.
+fn process_started(pid: u32) -> Option<u64> {
+    use windows::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let (mut created, mut exited, mut kernel, mut user) = (
+            FILETIME::default(),
+            FILETIME::default(),
+            FILETIME::default(),
+            FILETIME::default(),
+        );
+        let result = GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user);
+        let _ = CloseHandle(process);
+        result.ok().map(|_| filetime_to_unix_ms(created))
+    }
+}
+
+/// True while the owner process is still running. A process Bloom may not
+/// inspect counts as alive, so a session is never cleared on a guess.
+fn process_alive(owner: Owner) -> bool {
+    use windows::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, FILETIME};
+    use windows::Win32::System::Threading::{
+        GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    const STILL_ACTIVE: u32 = 259;
+    unsafe {
+        let process = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, owner.pid) {
+            Ok(process) => process,
+            Err(error) => return error.code() != ERROR_INVALID_PARAMETER.to_hresult(),
+        };
+        let mut code = 0;
+        let running = GetExitCodeProcess(process, &mut code).is_err() || code == STILL_ACTIVE;
+        let (mut created, mut exited, mut kernel, mut user) = (
+            FILETIME::default(),
+            FILETIME::default(),
+            FILETIME::default(),
+            FILETIME::default(),
+        );
+        let same = GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user)
+            .map_or(true, |_| {
+                filetime_to_unix_ms(created).abs_diff(owner.started) < 1_000
+            });
+        let _ = CloseHandle(process);
+        running && same
+    }
+}
+
+/// (parent pid, exe name) for every running process.
+fn process_table() -> HashMap<u32, (u32, String)> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    let mut table = HashMap::new();
+    unsafe {
+        let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            return table;
+        };
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut more = Process32FirstW(snapshot, &mut entry).is_ok();
+        while more {
+            let len = entry
+                .szExeFile
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(entry.szExeFile.len());
+            table.insert(
+                entry.th32ProcessID,
+                (
+                    entry.th32ParentProcessID,
+                    String::from_utf16_lossy(&entry.szExeFile[..len]),
+                ),
+            );
+            more = Process32NextW(snapshot, &mut entry).is_ok();
+        }
+        let _ = CloseHandle(snapshot);
+    }
+    table
+}
+
+/// The process on the other end of a loopback connection to the bridge.
+fn connection_sender(stream: &TcpStream) -> Option<u32> {
+    use windows::Win32::NetworkManagement::IpHelper::{
+        GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, TCP_TABLE_OWNER_PID_CONNECTIONS,
+    };
+    const AF_INET: u32 = 2;
+    let peer = stream.peer_addr().ok()?.port();
+    let local = stream.local_addr().ok()?.port();
+    let mut size = 0u32;
+    unsafe {
+        GetExtendedTcpTable(
+            None,
+            &mut size,
+            false,
+            AF_INET,
+            TCP_TABLE_OWNER_PID_CONNECTIONS,
+            0,
+        );
+    }
+    // u32 storage keeps the table rows aligned; leave room for new connections.
+    let mut buffer = vec![0u32; size as usize / 4 + 256];
+    size = (buffer.len() * 4) as u32;
+    let status = unsafe {
+        GetExtendedTcpTable(
+            Some(buffer.as_mut_ptr().cast()),
+            &mut size,
+            false,
+            AF_INET,
+            TCP_TABLE_OWNER_PID_CONNECTIONS,
+            0,
+        )
+    };
+    if status != 0 {
+        return None;
+    }
+    let count = buffer[0] as usize;
+    let rows = unsafe {
+        std::slice::from_raw_parts(
+            buffer.as_ptr().add(1).cast::<MIB_TCPROW_OWNER_PID>(),
+            count.min((buffer.len() - 1) * 4 / std::mem::size_of::<MIB_TCPROW_OWNER_PID>()),
+        )
+    };
+    let port = |value: u32| u16::from_be(value as u16);
+    rows.iter()
+        .find(|row| port(row.dwLocalPort) == peer && port(row.dwRemotePort) == local)
+        .map(|row| row.dwOwningPid)
+}
+
+/// The agent process behind a bridge connection.
+fn connection_origin(stream: &TcpStream) -> Origin {
+    let Some(sender) = connection_sender(stream) else {
+        return Origin::Unknown;
+    };
+    let table = process_table();
+    find_owner(sender, |pid| {
+        let (parent, name) = table.get(&pid)?.clone();
+        Some((parent, name, process_started(pid)?))
+    })
 }
 
 impl AgentAlert {
@@ -232,8 +509,7 @@ fn merge_hooks(
     hooks.retain(|_, groups| groups.as_array().is_some_and(|g| !g.is_empty()));
     if install {
         for event in hook_events(agent) {
-            let mut group =
-                json!({"hooks": [{"type": "command", "command": command, "timeout": 3}]});
+            let mut group = json!({"hooks": [hook_handler(command, agent)]});
             if *event == "Notification" {
                 group["matcher"] = json!("permission_prompt|elicitation_dialog");
             }
@@ -272,6 +548,28 @@ fn hook_events(agent: &str) -> &'static [&'static str] {
             "SessionEnd",
         ]
     }
+}
+
+// Claude runs async hooks in the background, so a slow PowerShell start never
+// delays the agent; the `at` launch time in the payload restores event order.
+fn hook_handler(command: &str, agent: &str) -> Value {
+    if agent == "claude" {
+        json!({"type": "command", "command": command, "async": true})
+    } else {
+        json!({"type": "command", "command": command, "timeout": 3})
+    }
+}
+
+/// True if the event has Bloom's handler exactly as this version installs it.
+fn has_current_hook(config: &Value, event: &str, command: &str, agent: &str) -> bool {
+    let expected = hook_handler(command, agent);
+    config["hooks"][event].as_array().is_some_and(|groups| {
+        groups.iter().any(|g| {
+            g["hooks"]
+                .as_array()
+                .is_some_and(|hs| hs.contains(&expected))
+        })
+    })
 }
 
 fn has_hook(config: &Value, event: &str, command: &str) -> bool {
@@ -338,7 +636,7 @@ pub fn agent_alert_status(
             let installed = has_hook(&config, "Stop", &command);
             let complete = hook_events(agent)
                 .iter()
-                .all(|event| has_hook(&config, event, &command));
+                .all(|event| has_current_hook(&config, event, &command, agent));
             (installed, installed && !complete)
         };
         integrations.push(IntegrationStatus {
@@ -412,6 +710,7 @@ pub fn test_agent_alert(
         session: "bloom-preview".into(),
         project: "Bloom preview".into(),
         activity,
+        at: None,
     };
     alert.validate()?;
     app.emit_to("main", "agent-alert", alert)
@@ -496,7 +795,7 @@ fn receive(
         },
         token,
     ) {
-        Ok(alert) => {
+        Ok(mut alert) => {
             if let Ok(mut agents) = app.state::<AgentBridge>().verified_agents.lock() {
                 if let std::collections::hash_map::Entry::Vacant(entry) =
                     agents.entry(alert.agent.clone())
@@ -510,6 +809,30 @@ fn receive(
                     save_verified_agents(app, &agents);
                 }
             }
+            let stale = alert.at.is_some_and(|at| {
+                let session = format!("{}:{}", alert.agent, alert.session);
+                EVENT_ORDER.lock().is_ok_and(|mut order| {
+                    is_stale(order.get_or_insert_with(HashMap::new), &session, at)
+                })
+            });
+            if !stale {
+                let mut owner = None;
+                if alert.kind != "resolved" && alert.kind != "stopped" {
+                    match connection_origin(stream) {
+                        Origin::Agent(agent) => owner = Some(agent),
+                        // A late hook from an agent that already exited: clear
+                        // its session instead of bringing it back.
+                        Origin::Ended => {
+                            alert.kind = "stopped".into();
+                            alert.activity = None;
+                        }
+                        Origin::Unknown => {}
+                    }
+                }
+                if let Ok(mut owners) = OWNERS.lock() {
+                    track_owner(owners.get_or_insert_with(HashMap::new), &alert, owner);
+                }
+            }
             let key = format!(
                 "{}:{}:{}:{}",
                 alert.agent,
@@ -521,7 +844,7 @@ fn receive(
             let enabled = crate::utils::get_setting_str(app, "bloom-agent-alerts-enabled")
                 .as_deref()
                 != Some("false");
-            if enabled && !recent.contains_key(&key) {
+            if enabled && !stale && !recent.contains_key(&key) {
                 recent.insert(key, Instant::now());
                 let _ = app.emit_to("main", "agent-alert", alert);
             }
@@ -582,6 +905,17 @@ pub fn setup(app: &tauri::AppHandle) {
     };
     match start() {
         Ok((listener, token)) => {
+            let watcher = app.clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(3));
+                let ended = OWNERS.lock().map_or_else(
+                    |_| Vec::new(),
+                    |mut owners| take_ended(owners.get_or_insert_with(HashMap::new), process_alive),
+                );
+                for alert in ended {
+                    let _ = watcher.emit_to("main", "agent-alert", alert);
+                }
+            });
             let app = app.clone();
             std::thread::spawn(move || {
                 let mut recent = HashMap::new();
@@ -676,6 +1010,148 @@ mod tests {
         assert_eq!(config, installed);
         merge_hooks(&mut config, "bloom-hook", "claude", false).unwrap();
         assert_eq!(config, original);
+    }
+    #[test]
+    fn claude_hooks_run_async_and_codex_hooks_keep_a_timeout() {
+        for (agent, is_async) in [("claude", true), ("codex", false)] {
+            let mut config = json!({});
+            merge_hooks(&mut config, "bloom", agent, true).unwrap();
+            for event in hook_events(agent) {
+                let handler = &config["hooks"][*event][0]["hooks"][0];
+                assert_eq!(handler["async"].as_bool().unwrap_or(false), is_async);
+                assert_eq!(handler.get("timeout").is_some(), !is_async);
+            }
+        }
+    }
+    #[test]
+    fn older_blocking_claude_hooks_are_reported_as_outdated() {
+        let mut config = json!({});
+        merge_hooks(&mut config, "bloom", "claude", true).unwrap();
+        assert!(has_current_hook(&config, "PreToolUse", "bloom", "claude"));
+        config["hooks"]["PreToolUse"][0]["hooks"][0] =
+            json!({"type": "command", "command": "bloom", "timeout": 3});
+        assert!(has_hook(&config, "PreToolUse", "bloom"));
+        assert!(!has_current_hook(&config, "PreToolUse", "bloom", "claude"));
+    }
+    fn alert(session: &str, kind: &str) -> AgentAlert {
+        AgentAlert {
+            agent: "claude".into(),
+            session: session.into(),
+            project: "bloom".into(),
+            kind: kind.into(),
+            activity: (kind == "working").then(|| "thinking".into()),
+            at: Some(1),
+        }
+    }
+    #[test]
+    fn owner_lookup_skips_relay_shells_and_rejects_reused_parents() {
+        // claude.exe (10) -> bash.exe (20) -> powershell.exe (30) sends the event.
+        let tree = |pid| match pid {
+            10 => Some((1, "claude.exe".to_string(), 100)),
+            20 => Some((10, "bash.exe".to_string(), 200)),
+            30 => Some((20, "PowerShell.EXE".to_string(), 300)),
+            // pid 40's parent id now belongs to a process that started later.
+            40 => Some((50, "cmd.exe".to_string(), 400)),
+            50 => Some((1, "claude.exe".to_string(), 500)),
+            60 => Some((99, "pwsh.exe".to_string(), 600)),
+            _ => None,
+        };
+        let claude = Origin::Agent(Owner {
+            pid: 10,
+            started: 100,
+        });
+        assert_eq!(find_owner(30, tree), claude);
+        // An agent connecting directly (OpenCode's plugin) owns its own events.
+        assert_eq!(find_owner(10, tree), claude);
+        // A late hook whose agent exited: its parent id was reused or is gone.
+        assert_eq!(find_owner(40, tree), Origin::Ended);
+        assert_eq!(find_owner(60, tree), Origin::Ended);
+        assert_eq!(find_owner(77, tree), Origin::Unknown);
+        // System processes and endless relay chains are never treated as agents.
+        assert_eq!(
+            find_owner(4, |_| Some((0, "System".into(), 1))),
+            Origin::Unknown
+        );
+        assert_eq!(
+            find_owner(5, |pid| Some((pid + 1, "cmd.exe".into(), 1))),
+            Origin::Unknown
+        );
+    }
+    #[test]
+    fn ended_agent_processes_clear_their_sessions() {
+        let mut owners = HashMap::new();
+        let a = Owner {
+            pid: 100,
+            started: 1,
+        };
+        let b = Owner {
+            pid: 200,
+            started: 2,
+        };
+        assert!(track_owner(&mut owners, &alert("s1", "working"), Some(a)));
+        assert!(track_owner(&mut owners, &alert("s2", "ready"), Some(b)));
+        assert!(!track_owner(&mut owners, &alert("s3", "working"), None));
+        assert!(take_ended(&mut owners, |_| true).is_empty());
+        let ended = take_ended(&mut owners, |owner| owner != a);
+        assert_eq!(ended.len(), 1);
+        assert_eq!(
+            (
+                ended[0].session.as_str(),
+                ended[0].kind.as_str(),
+                ended[0].activity.as_deref()
+            ),
+            ("s1", "stopped", None)
+        );
+        assert_eq!(owners.len(), 1);
+        // A session that ends normally is forgotten, so it is not stopped twice.
+        assert!(!track_owner(&mut owners, &alert("s2", "stopped"), Some(b)));
+        assert!(take_ended(&mut owners, |_| false).is_empty());
+    }
+    #[test]
+    fn process_liveness_follows_a_real_process_and_detects_reused_ids() {
+        use std::process::{Command, Stdio};
+        let me = std::process::id();
+        let started = process_started(me).expect("own creation time");
+        assert!(process_alive(Owner { pid: me, started }));
+        let mut child = Command::new("ping")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let owner = Owner {
+            pid: child.id(),
+            started: process_started(child.id()).expect("child creation time"),
+        };
+        assert!(process_alive(owner));
+        // Same pid, different start time: a reused id is not the same agent.
+        assert!(!process_alive(Owner {
+            started: owner.started - 5_000,
+            ..owner
+        }));
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(!process_alive(owner));
+    }
+    #[test]
+    fn connection_owner_identifies_the_connecting_process() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        let Origin::Agent(owner) = connection_origin(&server) else {
+            panic!("connecting process not identified")
+        };
+        assert_eq!(owner.pid, std::process::id());
+        assert!(process_alive(owner));
+        drop(client);
+    }
+    #[test]
+    fn late_background_events_cannot_overwrite_newer_state() {
+        let mut order = HashMap::new();
+        assert!(!is_stale(&mut order, "claude:s1", 100)); // working
+        assert!(!is_stale(&mut order, "claude:s1", 300)); // ready
+        assert!(is_stale(&mut order, "claude:s1", 200)); // slow "working" lands last
+        assert!(!is_stale(&mut order, "claude:s1", 300)); // same launch time is kept
+        assert!(!is_stale(&mut order, "claude:s2", 50)); // sessions are independent
     }
     #[test]
     fn malformed_config_is_rejected() {
@@ -780,8 +1256,10 @@ mod tests {
                 let payload = read_request(&mut reader, "test-token").unwrap_or_else(|error| {
                     panic!("{error}: {}", String::from_utf8_lossy(&reader.bytes))
                 });
+                // While the hook waits for the reply, Bloom can see who sent it.
+                let owner = connection_origin(&stream);
                 stream.write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
-                payload
+                (payload, owner)
             });
             let mut child = Command::new("powershell.exe")
                 .args([
@@ -812,11 +1290,23 @@ mod tests {
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            let payload = server.join().unwrap();
+            let (payload, owner) = server.join().unwrap();
+            // The hook runs in powershell.exe, which is skipped as a relay: the
+            // owner is the process that launched it, here the test binary.
+            assert!(
+                matches!(owner, Origin::Agent(Owner { pid, .. }) if pid == std::process::id()),
+                "{owner:?}"
+            );
             assert_eq!(payload.agent, agent);
             assert_eq!(payload.kind, kind);
             assert_eq!(payload.project, "bloom");
             assert_eq!(payload.session, "session-test");
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+            let at = payload.at.expect("hook sends its launch time");
+            assert!(at <= now && now - at < 120_000, "at={at} now={now}");
             if event == "PermissionRequest" && agent == "codex" {
                 assert_eq!(payload.activity.as_deref(), Some("working"));
             }
