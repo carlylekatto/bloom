@@ -4,6 +4,7 @@ import { BellRing } from "lucide-react";
 import { SettingRow } from "./SettingRow";
 import { AgentAlert, AgentLogo } from "../components/AgentAlert";
 import { AGENT_NAMES, type Agent, type AgentAlertKind } from "../agentAlerts";
+import { t, useTranslation } from "../i18n";
 import "./IntegrationsTab.css";
 
 interface Integration {
@@ -19,9 +20,10 @@ interface BridgeStatus {
 }
 
 export function AgentIntegrations({ enabled, onToggle }: { enabled: boolean; onToggle: () => void }) {
+	useTranslation();
 	const [status, setStatus] = useState<BridgeStatus | null>(null);
 	const [busy, setBusy] = useState(false);
-	const [message, setMessage] = useState("");
+	const [message, setMessage] = useState<Agent | "preview" | "">("");
 	const [error, setError] = useState("");
 	const [previewWidth, setPreviewWidth] = useState(264);
 	const [previewAgent, setPreviewAgent] = useState<Agent>("claude");
@@ -63,7 +65,7 @@ export function AgentIntegrations({ enabled, onToggle }: { enabled: boolean; onT
 				await invoke("open_app", { appName: "codex://settings" });
 				return;
 			}
-			setMessage(installing ? "" : `${AGENT_NAMES[integration.agent]} disconnected. Restart the agent to apply.`);
+			setMessage(installing ? "" : integration.agent);
 		} catch (e) {
 			setError(String(e));
 		} finally {
@@ -89,26 +91,24 @@ export function AgentIntegrations({ enabled, onToggle }: { enabled: boolean; onT
 				kind: previewKind,
 				activity: previewKind === "working" ? previewActivity : null
 			});
-			setMessage(
-				"Preview sent to the notch. It waits until the notch is free and Windows allows notifications."
-			);
+			setMessage("preview");
 		} catch (e) {
 			setError(String(e));
 		}
 	};
 	return (
 		<>
-			<div className="setting-group-label">Agent alerts</div>
+			<div className="setting-group-label">{t("agentIntegrations.group")}</div>
 			<div className="setting-group">
 				<SettingRow
 					icon={BellRing}
-					label="Notch Notifications"
-					desc="A live activity while your agent works, with alerts when it needs you"
+					label={t("agentIntegrations.title")}
+					desc={t("agentIntegrations.description")}
 					divider={false}
 				>
 					<label className="toggle-switch">
 						<input
-							aria-label="Agent notch notifications"
+							aria-label={t("agentIntegrations.toggleLabel")}
 							type="checkbox"
 							checked={enabled}
 							onChange={onToggle}
@@ -117,7 +117,7 @@ export function AgentIntegrations({ enabled, onToggle }: { enabled: boolean; onT
 					</label>
 				</SettingRow>
 			</div>
-			<div className="agent-preview" aria-label="Agent notification preview">
+			<div className="agent-preview" aria-label={t("agentIntegrations.previewLabel")}>
 				<div className="agent-preview-pill" style={{ width: `min(${previewWidth}px, 100%)` }}>
 					<AgentAlert
 						key={previewAgent}
@@ -135,7 +135,7 @@ export function AgentIntegrations({ enabled, onToggle }: { enabled: boolean; onT
 				</div>
 				<div className="agent-preview-controls">
 					<select
-						aria-label="Preview agent"
+						aria-label={t("agentIntegrations.previewAgent")}
 						value={previewAgent}
 						onChange={(e) => setPreviewAgent(e.target.value as Agent)}
 					>
@@ -146,7 +146,7 @@ export function AgentIntegrations({ enabled, onToggle }: { enabled: boolean; onT
 						))}
 					</select>
 					<select
-						aria-label="Preview event"
+						aria-label={t("agentIntegrations.previewEvent")}
 						value={previewKind === "working" ? previewActivity : previewKind}
 						onChange={(e) => {
 							const value = e.target.value;
@@ -157,21 +157,21 @@ export function AgentIntegrations({ enabled, onToggle }: { enabled: boolean; onT
 							} else setPreviewKind(value as AgentAlertKind);
 						}}
 					>
-						<option value="thinking">Thinking</option>
-						<option value="reading">Reading</option>
-						<option value="editing">Editing</option>
-						<option value="running">Running</option>
-						<option value="working">Working</option>
-						<option value="ready">Response ready</option>
-						<option value="attention">Needs attention</option>
-						<option value="error">Session error</option>
+						<option value="thinking">{t("agentActivity.thinking")}</option>
+						<option value="reading">{t("agentActivity.reading")}</option>
+						<option value="editing">{t("agentActivity.editing")}</option>
+						<option value="running">{t("agentActivity.running")}</option>
+						<option value="working">{t("agentActivity.working")}</option>
+						<option value="ready">{t("agentActivity.ready")}</option>
+						<option value="attention">{t("agentActivity.attention")}</option>
+						<option value="error">{t("agentActivity.error")}</option>
 					</select>
 					<button type="button" disabled={!enabled} onClick={() => void test()}>
-						Test notch
+						{t("agentIntegrations.test")}
 					</button>
 				</div>
 			</div>
-			<div className="setting-group-label">Connect your agents</div>
+			<div className="setting-group-label">{t("agentIntegrations.connectGroup")}</div>
 			<div className="setting-group agent-integrations">
 				{status?.integrations.map((integration) => (
 					<div className="agent-integration" key={integration.agent}>
@@ -180,16 +180,16 @@ export function AgentIntegrations({ enabled, onToggle }: { enabled: boolean; onT
 							<strong>{AGENT_NAMES[integration.agent]}</strong>
 							<span title={integration.path}>
 								{integration.needs_update
-									? integration.agent === "opencode" ? "Update for OpenCode 2 support" : "Update for live activity"
+									? integration.agent === "opencode" ? t("agentIntegrations.updateOpenCode") : t("agentIntegrations.updateActivity")
 									: integration.installed
 										? integration.verified_at != null
-											? "Connected"
-											: "Installed · awaiting first event"
+											? t("agentIntegrations.connected")
+											: t("agentIntegrations.awaiting")
 										: integration.agent === "opencode"
-											? "Local notification plugin"
+											? t("agentIntegrations.plugin")
 											: integration.agent === "codex"
-												? "One approval in Codex during setup"
-												: "Lifecycle notification hooks"}
+												? t("agentIntegrations.codexApproval")
+												: t("agentIntegrations.hooks")}
 							</span>
 						</div>
 						{integration.installed && !integration.needs_update && integration.verified_at == null && (
@@ -198,7 +198,7 @@ export function AgentIntegrations({ enabled, onToggle }: { enabled: boolean; onT
 								aria-expanded={setupIntegration?.agent === integration.agent}
 								onClick={() => setSetupAgent(setupIntegration?.agent === integration.agent ? null : integration.agent)}
 							>
-								Setup help
+								{t("agentIntegrations.help")}
 							</button>
 						)}
 						<button
@@ -207,64 +207,58 @@ export function AgentIntegrations({ enabled, onToggle }: { enabled: boolean; onT
 							onClick={() => void configure(integration)}
 						>
 							{integration.needs_update
-								? "Update"
+								? t("agentIntegrations.update")
 								: integration.installed
-									? "Disconnect"
+									? t("agentIntegrations.disconnect")
 									: integration.agent === "codex"
-										? "Set up"
-										: "Connect"}
+										? t("agentIntegrations.setup")
+										: t("agentIntegrations.connect")}
 						</button>
 					</div>
 				))}
-				{!status && !error && <p className="agent-integration-note">Loading integrations…</p>}
+				{!status && !error && <p className="agent-integration-note">{t("agentIntegrations.loading")}</p>}
 			</div>
 			{setupIntegration && (
-				<section className="agent-setup" aria-label={`${AGENT_NAMES[setupIntegration.agent]} setup`}>
+				<section className="agent-setup" aria-label={t("agentIntegrations.setupLabel", { agent: AGENT_NAMES[setupIntegration.agent] })}>
 					<div className="agent-setup-heading">
-						<strong>Verify {AGENT_NAMES[setupIntegration.agent]}</strong>
-						<span>Bloom will mark this connection as verified when it receives an event.</span>
+						<strong>{t("agentIntegrations.verify", { agent: AGENT_NAMES[setupIntegration.agent] })}</strong>
+						<span>{t("agentIntegrations.verifyDescription")}</span>
 					</div>
 					<ol className="agent-setup-steps">
 						<li className="current">
 							<span className="agent-setup-number">1</span>
 							<div>
-								<strong>{setupIntegration.agent === "codex" ? "Allow Bloom’s hooks" : `Restart ${AGENT_NAMES[setupIntegration.agent]}`}</strong>
+								<strong>{setupIntegration.agent === "codex" ? t("agentIntegrations.allowHooks") : t("agentIntegrations.restart", { agent: AGENT_NAMES[setupIntegration.agent] })}</strong>
 								<span>{setupIntegration.agent === "codex"
-									? "Review the Bloom hooks in Codex Settings or use /hooks in the CLI."
+									? t("agentIntegrations.reviewHooks")
 									: setupIntegration.agent === "opencode"
-										? "Restart OpenCode. If you use OpenCode 2’s shared service, stop it with opencode service stop, then reopen OpenCode."
-										: "Restart the agent to load the integration."}</span>
+										? t("agentIntegrations.restartOpenCode")
+										: t("agentIntegrations.restartDescription")}</span>
 							</div>
 							{setupIntegration.agent === "codex" && (
-								<button type="button" onClick={() => void openCodexSettings()}>Open Codex settings</button>
+								<button type="button" onClick={() => void openCodexSettings()}>{t("agentIntegrations.openCodex")}</button>
 							)}
 						</li>
 						<li>
 							<span className="agent-setup-number">2</span>
 							<div>
-								<strong>Send a new prompt</strong>
-								<span>Watch for the activity in Bloom’s notch.</span>
+								<strong>{t("agentIntegrations.sendPrompt")}</strong>
+								<span>{t("agentIntegrations.watch")}</span>
 							</div>
-							<button type="button" onClick={() => setSetupAgent(null)}>Close</button>
+							<button type="button" onClick={() => setSetupAgent(null)}>{t("agentIntegrations.close")}</button>
 						</li>
 					</ol>
 				</section>
 			)}
 			<p className="agent-integration-note">
-				Connecting adds Bloom hooks or a plugin to your agent’s user configuration. Existing hooks
-				are preserved. Restart the agent after connecting or disconnecting; Codex also requires hook
-				review. Start a new prompt after setup. “Test notch” checks Bloom’s display only; “Connected”
-				means Bloom has received an event from the agent. Local Windows sessions only.
+				{t("agentIntegrations.configurationNote")}
 			</p>
 			<p className="agent-integration-note">
-				The activity stays in the notch while your agent works. The logo and status sit on the left,
-				with elapsed time on the right. Click to open your usual notch panel. Completion appears for four seconds. Prompts, responses and
-				tool arguments are never forwarded. Attention alerts leave a badge until dismissed or work
-				resumes.
+				{t("agentIntegrations.activityNote")}
 			</p>
 			{message && (
 				<p className="agent-integration-message" role="status">
-					{message}
+					{message === "preview" ? t("agentIntegrations.previewSent") : t("agentIntegrations.disconnected", { agent: AGENT_NAMES[message] })}
 				</p>
 			)}
 			{(error || status?.error) && (

@@ -1,14 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { motion, useIsPresent, useReducedMotion } from "framer-motion";
 import {
-	AGENT_ACTIVITIES,
 	agentActivityWidth,
-	AGENT_MESSAGES,
 	AGENT_NAMES,
 	formatAgentElapsed,
 	type Agent,
 	type AgentAlert as Alert
 } from "../agentAlerts";
+import { t, useTranslation } from "../i18n";
 import "./AgentAlert.css";
 
 // Fixed asset paths: logo URLs are never built from an agent value, which can
@@ -54,6 +53,7 @@ export function AgentAlert({
 	alert: Alert & { started?: number; received?: number };
 	onWidthChange?: (width: number) => void;
 }) {
+	useTranslation();
 	const isPresent = useIsPresent();
 	const containerRef = useRef<HTMLDivElement>(null);
 	useLayoutEffect(() => {
@@ -73,9 +73,9 @@ export function AgentAlert({
 	const [fallbackStart] = useState(Date.now);
 	const working = alert.kind === "working";
 	const label = working
-		? AGENT_ACTIVITIES[alert.activity ?? "thinking"]
-		: AGENT_MESSAGES[alert.kind];
-	const description = `${AGENT_NAMES[alert.agent]} · ${alert.project}: ${label}`;
+		? t(`agentActivity.${alert.activity === "checking" ? "working" : (alert.activity ?? "thinking")}`)
+		: t(`agentActivity.${alert.kind}`);
+	const description = t("agentActivity.description", { agent: AGENT_NAMES[alert.agent], project: alert.project, status: label });
 	return (
 		<motion.div
 			ref={containerRef}

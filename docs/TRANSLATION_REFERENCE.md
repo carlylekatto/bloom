@@ -865,3 +865,75 @@ This page is generated from the [current English catalog](../src/i18n/locales/en
 | `battery.pluggedCharging` | {{percent}}% available (plugged in, charging) |
 | `battery.pluggedNotCharging` | {{percent}}% available (plugged in, not charging) |
 | `battery.chargingPercent` | {{level}}%, charging |
+
+## Agent Integrations
+
+| Reference key | English text |
+| --- | --- |
+| `agentIntegrations.group` | Agent alerts |
+| `agentIntegrations.title` | Notch Notifications |
+| `agentIntegrations.description` | A live activity while your agent works, with alerts when it needs you |
+| `agentIntegrations.toggleLabel` | Agent notch notifications |
+| `agentIntegrations.previewLabel` | Agent notification preview |
+| `agentIntegrations.previewAgent` | Preview agent |
+| `agentIntegrations.previewEvent` | Preview event |
+| `agentIntegrations.test` | Test notch |
+| `agentIntegrations.connectGroup` | Connect your agents |
+| `agentIntegrations.updateOpenCode` | Update for OpenCode 2 support |
+| `agentIntegrations.updateActivity` | Update for live activity |
+| `agentIntegrations.connected` | Connected |
+| `agentIntegrations.awaiting` | Installed · awaiting first event |
+| `agentIntegrations.plugin` | Local notification plugin |
+| `agentIntegrations.codexApproval` | One approval in Codex during setup |
+| `agentIntegrations.hooks` | Lifecycle notification hooks |
+| `agentIntegrations.help` | Setup help |
+| `agentIntegrations.update` | Update |
+| `agentIntegrations.disconnect` | Disconnect |
+| `agentIntegrations.setup` | Set up |
+| `agentIntegrations.connect` | Connect |
+| `agentIntegrations.loading` | Loading integrations… |
+| `agentIntegrations.verifyDescription` | Bloom will mark this connection as verified when it receives an event. |
+| `agentIntegrations.allowHooks` | Allow Bloom’s hooks |
+| `agentIntegrations.reviewHooks` | Review the Bloom hooks in Codex Settings or use /hooks in the CLI. |
+| `agentIntegrations.restartOpenCode` | Restart OpenCode. If you use OpenCode 2’s shared service, stop it with opencode service stop, then reopen OpenCode. |
+| `agentIntegrations.restartDescription` | Restart the agent to load the integration. |
+| `agentIntegrations.openCodex` | Open Codex settings |
+| `agentIntegrations.sendPrompt` | Send a new prompt |
+| `agentIntegrations.watch` | Watch for the activity in Bloom’s notch. |
+| `agentIntegrations.close` | Close |
+| `agentIntegrations.previewSent` | Preview sent to the notch. It waits until the notch is free and Windows allows notifications. |
+| `agentIntegrations.disconnected` | {{agent}} disconnected. Restart the agent to apply. |
+| `agentIntegrations.setupLabel` | {{agent}} setup |
+| `agentIntegrations.verify` | Verify {{agent}} |
+| `agentIntegrations.restart` | Restart {{agent}} |
+| `agentIntegrations.configurationNote` | Connecting adds Bloom hooks or a plugin to your agent’s user configuration. Existing hooks are preserved. Restart the agent after connecting or disconnecting; Codex also requires hook review. Start a new prompt after setup. “Test notch” checks Bloom’s display only; “Connected” means Bloom has received an event from the agent. Local Windows sessions only. |
+| `agentIntegrations.activityNote` | The activity stays in the notch while your agent works. The logo and status sit on the left, with elapsed time on the right. Click to open your usual notch panel. Completion appears for four seconds. Prompts, responses and tool arguments are never forwarded. Attention alerts leave a badge until dismissed or work resumes. |
+
+## Agent Activity
+
+| Reference key | English text |
+| --- | --- |
+| `agentActivity.thinking` | Thinking |
+| `agentActivity.reading` | Reading |
+| `agentActivity.editing` | Editing |
+| `agentActivity.running` | Running |
+| `agentActivity.working` | Working |
+| `agentActivity.ready` | Response ready |
+| `agentActivity.attention` | Needs attention |
+| `agentActivity.error` | Session error |
+| `agentActivity.resolved` | Resumed |
+| `agentActivity.stopped` | Stopped |
+| `agentActivity.description` | {{agent}} · {{project}}: {{status}} |
+| `agentActivity.attentionBadge_one` | {{count}} agent session needs your attention. Show alert. |
+| `agentActivity.attentionBadge_other` | {{count}} agent sessions need your attention. Show alert. |
+
+## Integrations
+
+| Reference key | English text |
+| --- | --- |
+| `integrations.agents` | AI agents |
+| `integrations.agentsDescription` | Follow your agents’ progress and get notified when they need you. |
+| `integrations.calendars` | Calendars |
+| `integrations.calendarsDescription` | Bring your schedule into Bloom. |
+| `integrations.calendarPlanned` | Calendar connections are planned for a future update. |
+| `integrations.planned` | Planned |
