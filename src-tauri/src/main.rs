@@ -8,6 +8,7 @@ mod commands;
 mod ddc_ci;
 mod diagnostics;
 mod dock_extras;
+mod i18n;
 mod jack;
 mod onboarding;
 mod services;
@@ -215,6 +216,7 @@ fn main() {
             set_volume_mixer_rect,
             clear_volume_mixer_rect,
             save_setting,
+            i18n::set_tray_language,
             load_settings,
             settings_file_readable,
             capture_window_thumbnail,
@@ -456,6 +458,13 @@ fn main() {
                 let settings_item =
                     MenuItem::with_id(app, "settings", "Open Settings", true, None::<&str>)?;
                 let menu = Menu::with_items(app, &[&settings_item, &restart_item, &quit_item])?;
+                app.manage(i18n::TrayMessages {
+                    settings: settings_item,
+                    restart: restart_item,
+                    quit: quit_item,
+                });
+                let locale = get_setting_str(app.handle(), "bloom-language").unwrap_or_default();
+                let _ = i18n::set_tray_language(app.handle().clone(), locale);
                 let ah = app.handle().clone();
                 TrayIconBuilder::new()
                     .icon(app.default_window_icon().unwrap().clone())

@@ -27,6 +27,7 @@
 			"notch": "Notch",
 			"dock": "Dock",
 			"overlays": "Overlays",
+			"integrations": "Integrations",
 			"about": "About"
 		},
 		"groups": {
@@ -46,6 +47,7 @@
 			"language": "Language",
 			"languageDesc": "Bloom's display language",
 			"languageSystem": "System default",
+			"languageFallbackDesc": "Untranslated text uses English. Community translations may be incomplete.",
 			"launchAtLogin": "Launch at Login",
 			"launchAtLoginDesc": "Open Bloom automatically",
 			"updateIndicator": "Update Indicator",
@@ -104,7 +106,9 @@
 			"iconColorful": "Colorful",
 			"iconGolden": "Golden",
 			"iconOrange": "Orange",
-			"iconWindows": "Windows"
+			"iconWindows": "Windows",
+			"showTrayApps": "Show Background Apps",
+			"showTrayAppsDesc": "Keep apps that close to the tray visible in the dock. Off matches the Windows taskbar, which hides them behind the tray overflow."
 		},
 		"notch": {
 			"behavior": "Notch Behavior",
@@ -654,6 +658,7 @@
 			"chooseWhatAppearsAtTheTopOfYourScreen": "Choose what appears at the top of your screen.",
 			"shapeTheTaskbarReplacementAroundYourWorkflow": "Shape the taskbar replacement around your workflow.",
 			"keepQuickControlsVisibleOnlyWhenYouNeedThem": "Keep quick controls visible only when you need them.",
+			"connectYourAppsAndServicesToBloom": "Connect your apps and services to Bloom.",
 			"versionUpdatesAndYourSettingsData": "Version, updates and your settings data.",
 			"makeItYours": "Make it yours",
 			"changesCouldNotBeSavedYourSavedSettingsHaveBeen": "Changes could not be saved. Your saved settings have been restored.",

@@ -197,9 +197,6 @@ const Dock = memo(function Dock() {
 	const [dockPreviewEnabled, setDockPreviewEnabled] = useState(
 		() => localStorage.getItem("bloom-dock-preview-enabled") !== "false"
 	);
-	const [dockShowBackgroundApps, setDockShowBackgroundApps] = useState(
-		() => localStorage.getItem("bloom-dock-show-background-apps") !== "false"
-	);
 	const [edgeShineEnabled, setEdgeShineEnabled] = useState(
 		() => localStorage.getItem("bloom-edge-shine-enabled") !== "false"
 	);
@@ -210,7 +207,7 @@ const Dock = memo(function Dock() {
 		() => localStorage.getItem("bloom-dock-separator-enabled") !== "false"
 	);
 	const [dockShowTrayApps, setDockShowTrayApps] = useState(
-		() => localStorage.getItem("bloom-dock-show-tray-apps") !== "false"
+		() => localStorage.getItem("bloom-dock-show-tray-apps") === "true"
 	);
 	const [dockAdaptive, setDockAdaptive] = useState(
 		() => localStorage.getItem("bloom-dock-adaptive") === "true"
@@ -479,7 +476,6 @@ const Dock = memo(function Dock() {
 
 			const preview = getVal("bloom-dock-preview-enabled", "true");
 			setDockPreviewEnabled(preview === "true");
-			setDockShowBackgroundApps(getVal("bloom-dock-show-background-apps") !== "false");
 			setEdgeShineEnabled(getVal("bloom-edge-shine-enabled", "true") !== "false");
 
 			const iconOnly = getVal("bloom-dock-icon-only", "false");
@@ -488,8 +484,10 @@ const Dock = memo(function Dock() {
 			const separator = getVal("bloom-dock-separator-enabled", "true");
 			setDockSeparatorEnabled(separator === "true");
 
-			const showTrayApps = getVal("bloom-dock-show-tray-apps", "true");
-			setDockShowTrayApps(showTrayApps !== "false");
+			// The fork keeps tray apps out of the dock by default, so the app
+			// row means windows the way the taskbar it replaced did.
+			const showTrayApps = getVal("bloom-dock-show-tray-apps", "false");
+			setDockShowTrayApps(showTrayApps === "true");
 
 			const adaptive = getVal("bloom-dock-adaptive", "false");
 			setDockAdaptive(adaptive === "true");
@@ -576,11 +574,10 @@ const Dock = memo(function Dock() {
 	useSettingsSync({
 		"bloom-dock-mode": setDockMode,
 		"bloom-dock-preview-enabled": setDockPreviewEnabled,
-		"bloom-dock-show-background-apps": { set: setDockShowBackgroundApps, defaultValue: true },
 		"bloom-edge-shine-enabled": setEdgeShineEnabled,
 		"bloom-dock-icon-only": setDockIconOnly,
 		"bloom-dock-separator-enabled": setDockSeparatorEnabled,
-		"bloom-dock-show-tray-apps": setDockShowTrayApps,
+		"bloom-dock-show-tray-apps": { set: setDockShowTrayApps, defaultValue: false },
 		"bloom-dock-adaptive": setDockAdaptive,
 		"bloom-dock-task-view": setDockTaskView,
 		"bloom-start-icon": setStartIcon,
@@ -1225,13 +1222,10 @@ const Dock = memo(function Dock() {
 
 		const unpinned = activeOrder
 			.map((id) => activeApps.find((a) => appIdentity(a.path, a.executable, a.name) === id))
-			.filter(
-				(a): a is AppInfo =>
-					!!a && (dockShowBackgroundApps || !a.is_background) && !matchedRunningKeys.has(itemKey(a))
-			);
+			.filter((a): a is AppInfo => !!a && !matchedRunningKeys.has(itemKey(a)));
 
 		return [...pinned, ...unpinned];
-	}, [pinnedApps, activeApps, activeOrder, dockShowBackgroundApps]);
+	}, [pinnedApps, activeApps, activeOrder]);
 
 	const startItem = useMemo(
 		() => dockItems.find((i) => i.path === "start") as AppInfo,
@@ -1790,7 +1784,7 @@ const Dock = memo(function Dock() {
 														);
 													})()}
 												</motion.div>
-												{app.is_running && (dockShowBackgroundApps || !app.is_background) && (
+												{app.is_running && (
 													<WindowDots
 														count={app.all_hwnds?.length ?? 1}
 														background={app.is_background}

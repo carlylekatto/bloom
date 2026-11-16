@@ -5,7 +5,6 @@ import {
 	Eye,
 	EyeOff,
 	Circle,
-	Layers,
 	Columns2,
 	Maximize2,
 	Keyboard,
@@ -113,8 +112,6 @@ interface DockTabProps {
 	handleDockEdgeDelayChange: (val: number) => void;
 	dockPreviewEnabled: boolean;
 	toggleDockPreview: () => void;
-	dockShowBackgroundApps: boolean;
-	toggleDockShowBackgroundApps: () => void;
 	dockIconOnly: boolean;
 	dockShowTrayApps: boolean;
 	toggleDockIconOnly: () => void;
@@ -153,8 +150,6 @@ export function DockTab({
 	handleDockEdgeDelayChange,
 	dockPreviewEnabled,
 	toggleDockPreview,
-	dockShowBackgroundApps,
-	toggleDockShowBackgroundApps,
 	dockIconOnly,
 	dockShowTrayApps,
 	toggleDockShowTrayApps,
@@ -263,22 +258,6 @@ export function DockTab({
 						</SettingRow>
 
 						<SettingRow
-							icon={Layers}
-							label={t("settings.dock.backgroundApps")}
-							desc={t("settings.dock.backgroundAppsDesc")}
-						>
-							<label className="toggle-switch">
-								<input
-									type="checkbox"
-									aria-label={t("settings.dock.backgroundApps")}
-									checked={dockShowBackgroundApps}
-									onChange={toggleDockShowBackgroundApps}
-								/>
-								<span className="slider"></span>
-							</label>
-						</SettingRow>
-
-						<SettingRow
 							icon={Circle}
 							label={t("settings.dock.iconOnly")}
 							desc={t("settings.dock.iconOnlyDesc")}
@@ -292,8 +271,8 @@ export function DockTab({
 
 						<SettingRow
 							icon={Inbox}
-							label="Tray Apps in Dock"
-							desc="Keep apps that close to the tray visible in the dock. Turn off to match the Windows taskbar, which hides them behind the tray overflow."
+							label={t("settings.dock.showTrayApps")}
+							desc={t("settings.dock.showTrayAppsDesc")}
 						>
 							<label className="toggle-switch">
 								<input
