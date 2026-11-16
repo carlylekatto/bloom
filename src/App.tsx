@@ -3794,7 +3794,7 @@ function App() {
 																	min="0"
 																	max="1"
 																	step="0.01"
-																	aria-label="Volume"
+																	aria-label={t("notch.music.volume")}
 																	value={displayVolume}
 																	onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
 																	onPointerDown={(e) => e.stopPropagation()}
@@ -3915,7 +3915,7 @@ function App() {
 																			key="panel-prev"
 																			type="button"
 																			className="panel-arrow prev"
-																			aria-label="Previous panel"
+																			aria-label={t("ui.app.previousPanel")}
 																			initial={{ opacity: 0, x: 4 }}
 																			animate={{ opacity: 1, x: 0 }}
 																			exit={{ opacity: 0, x: 4 }}
@@ -3969,7 +3969,7 @@ function App() {
 																			key="panel-next"
 																			type="button"
 																			className="panel-arrow next"
-																			aria-label="Next panel"
+																			aria-label={t("ui.app.nextPanel")}
 																			initial={{ opacity: 0, x: -4 }}
 																			animate={{ opacity: 1, x: 0 }}
 																			exit={{ opacity: 0, x: -4 }}
@@ -4010,7 +4010,7 @@ function App() {
 																			)}
 																			<button
 																				className={`album-art album-art-activity${!isPlaying ? " paused" : ""}`}
-																				aria-label="Open music"
+																				aria-label={t("ui.app.openMusic")}
 																				onClick={(e) => {
 																					e.stopPropagation();
 																					openNotch("music");
@@ -4179,8 +4179,8 @@ function App() {
 													</div>
 													<button
 														className="cc-pill-more"
-														aria-label="Wi-Fi networks"
-														title="Wi-Fi networks"
+														aria-label={t("ui.app.wiFiNetworks")}
+														title={t("ui.app.wiFiNetworks")}
 														onClick={(e) => {
 															e.stopPropagation();
 															setBloomMode("wifi");
@@ -4249,8 +4249,8 @@ function App() {
 													</div>
 													<button
 														className="cc-pill-more"
-														aria-label="Bluetooth devices"
-														title="Bluetooth devices"
+														aria-label={t("ui.app.bluetoothDevices")}
+														title={t("ui.app.bluetoothDevices")}
 														onClick={(e) => {
 															e.stopPropagation();
 															setBloomMode("bluetooth");
@@ -4298,7 +4298,7 @@ function App() {
 															console.error
 														);
 													}}
-													title="Do Not Disturb — Open Windows notification settings"
+													title={t("ui.app.doNotDisturbOpenWindowsNotificationSettings")}
 												>
 													<MoonIcon />
 												</button>
@@ -4367,15 +4367,17 @@ function App() {
 															type="button"
 															className="cc-level-toggle"
 															onClick={toggleVolumeLevel}
-															aria-label={displayVolume > 0 ? "Mute volume" : "Restore volume"}
+															aria-label={
+																displayVolume > 0 ? t("ui.app.muteVolume") : t("ui.app.restoreVolume")
+															}
 															aria-pressed={displayVolume === 0}
-															title={displayVolume > 0 ? "Mute volume" : "Restore volume"}
+															title={
+																displayVolume > 0 ? t("ui.app.muteVolume") : t("ui.app.restoreVolume")
+															}
 														>
 															<CommandVolumeIcon />
 														</button>
-														<span>Volume</span>
-														<VolumeLowIcon style={{ opacity: 0.5 }} />
-														<span>{t("notch.commandCenter.volume")}</span>
+															<span>{t("notch.commandCenter.volume")}</span>
 													</div>
 													<div className="cc-classic-slider-track">
 														<input
@@ -4383,7 +4385,7 @@ function App() {
 															min="0"
 															max="1"
 															step="0.01"
-															aria-label="Volume"
+															aria-label={t("notch.commandCenter.volume")}
 															value={displayVolume}
 															onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
 															onPointerDown={(e) => e.stopPropagation()}
@@ -4405,8 +4407,10 @@ function App() {
 															setAppMixerOpen((v) => !v);
 														}}
 														onPointerDown={(e) => e.stopPropagation()}
-														title={appMixerOpen ? "Hide per-app volume" : "Per-app volume"}
-														aria-label={appMixerOpen ? "Hide per-app volume" : "Per-app volume"}
+														title={appMixerOpen ? t("ui.app.hidePerAppVolume") : t("ui.app.perAppVolume")}
+														aria-label={
+															appMixerOpen ? t("ui.app.hidePerAppVolume") : t("ui.app.perAppVolume")
+														}
 														aria-expanded={appMixerOpen}
 													>
 														<MixerIcon size={13} />
@@ -4416,9 +4420,6 @@ function App() {
 															{volumeError}
 														</div>
 													)}
-													<span className="cc-classic-percentage">
-														{Math.round(displayVolume * 100)}%
-													</span>
 												</div>
 
 												{/* Per-app volumes. This renders inside the container App.tsx reports
@@ -4447,16 +4448,20 @@ function App() {
 															className="cc-level-toggle"
 															onClick={toggleBrightnessLevel}
 															aria-label={
-																currentBrightness > 0 ? "Minimize brightness" : "Restore brightness"
+																currentBrightness > 0
+																	? t("ui.app.minimizeBrightness")
+																		: t("ui.app.restoreBrightness")
 															}
 															aria-pressed={currentBrightness === 0}
 															title={
-																currentBrightness > 0 ? "Minimize brightness" : "Restore brightness"
+																currentBrightness > 0
+																	? t("ui.app.minimizeBrightness")
+																		: t("ui.app.restoreBrightness")
 															}
 														>
 															<CommandBrightnessIcon />
 														</button>
-														<span>Brightness</span>
+															<span>{t("notch.commandCenter.brightness")}</span>
 													</div>
 													<div className="cc-classic-slider-track">
 														<input
@@ -4464,7 +4469,7 @@ function App() {
 															min="0"
 															max="100"
 															step="1"
-															aria-label="Brightness"
+															aria-label={t("notch.commandCenter.brightness")}
 															value={currentBrightness}
 															onChange={(e) => handleBrightnessChange(parseInt(e.target.value))}
 															onPointerDown={(e) => e.stopPropagation()}
@@ -4488,13 +4493,13 @@ function App() {
 															onPointerDown={(e) => e.stopPropagation()}
 															title={
 																showMonitorBreakdown
-																	? "Collapse display breakdown"
-																	: "Expand per-display brightness"
+																	? t("ui.app.expandPerDisplayBrightness")
+																	: t("ui.app.collapseDisplayBreakdown")
 															}
 															aria-label={
 																showMonitorBreakdown
-																	? "Collapse display breakdown"
-																	: "Expand per-display brightness"
+																	? t("ui.app.expandPerDisplayBrightness")
+																	: t("ui.app.collapseDisplayBreakdown")
 															}
 															aria-expanded={showMonitorBreakdown}
 														>
@@ -4877,7 +4882,7 @@ function App() {
 																	</span>
 																	<button
 																		className="shelf-tile-remove"
-																		title="Remove from shelf"
+																		title={t("ui.app.removeFromShelf")}
 																		onClick={(e) => {
 																			e.stopPropagation();
 																			removeShelfItem(item.id);

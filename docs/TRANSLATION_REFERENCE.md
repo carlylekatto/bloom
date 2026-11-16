@@ -410,6 +410,10 @@ This page is generated from the [current English catalog](../src/i18n/locales/en
 | `ui.app.restoreVolume` | Restore volume |
 | `ui.app.minimizeBrightness` | Minimize brightness |
 | `ui.app.restoreBrightness` | Restore brightness |
+| `ui.app.perAppVolume` | Per-app volume |
+| `ui.app.hidePerAppVolume` | Hide per-app volume |
+| `ui.app.expandPerDisplayBrightness` | Expand per-display brightness |
+| `ui.app.collapseDisplayBreakdown` | Collapse display breakdown |
 | `ui.app.typeToSetDuration` | Type to set duration |
 | `ui.app.setTimerDurationAsMinutesAndSecondsForExample1230` | Set timer duration as minutes and seconds, for example 1230 for 12 minutes 30 seconds |
 | `ui.app.dropFilesOrSelectedTextHere` | Drop files or selected text here |
