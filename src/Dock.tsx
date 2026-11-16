@@ -2482,7 +2482,6 @@ function AddAppPopup({
 		contains.sort(byName);
 		return [{ title: null, items: [...starts, ...contains].slice(0, 50) }];
 	}, [apps, debouncedSearch, pinned, runningSuggestions]);
-	}, [apps, debouncedSearch, pinned, runningSuggestions, t]);
 
 	// Flat selectable list; section headers are not selectable.
 	const flat = useMemo(() => sections.flatMap((s) => s.items), [sections]);
