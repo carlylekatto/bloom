@@ -7,17 +7,8 @@ import {
 	RefreshCw,
 	RotateCcw,
 	LogOut,
-	Compass
-} from "lucide-react";
-import {
-	Power,
-	Download,
-	Clock,
-	BatteryWarning,
-	RefreshCw,
-	RotateCcw,
-	LogOut,
-	Languages
+	Compass,
+	Languages,
 } from "lucide-react";
 import { SettingRow } from "./SettingRow";
 import { useTranslation, LOCALES, type LanguageSetting } from "../i18n";

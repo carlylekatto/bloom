@@ -150,7 +150,7 @@ export function AppearanceTab({
 						<span className="slider"></span>
 					</label>
 				</SettingRow>
-				<SettingRow icon={Square} label="Screen Corners" desc="Rounded top edges">
+
 				<SettingRow
 					icon={Square}
 					label={t("settings.appearance.corners")}

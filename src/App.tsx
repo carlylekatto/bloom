@@ -3153,21 +3153,13 @@ function App() {
 				if (!settingsWeatherEnabled || temperature === null) return null;
 				return statusWidget(
 					"weather",
-					cityName ? `${weatherCondition} — ${cityName}` : weatherCondition,
+					cityName
+						? t("notch.status.weatherTooltip", {
+								condition: weatherCondition,
+								city: cityName
+							})
+						: weatherCondition,
 					<>
-				return (
-					<div
-						className="passive-feature"
-						key="weather"
-						title={
-							cityName
-								? t("notch.status.weatherTooltip", {
-										condition: weatherCondition,
-										city: cityName
-									})
-								: weatherCondition
-						}
-					>
 						<WeatherIcon size={12} strokeWidth={2.2} />
 						<span className="label">
 							{temperature}°{tempUnit === "fahrenheit" ? "F" : "C"}
@@ -3195,10 +3187,8 @@ function App() {
 			case "cpu":
 				return statusWidget(
 					"cpu",
-					"CPU Usage",
+					t("notch.status.cpuUsage"),
 					<>
-				return (
-					<div className="passive-feature" key="cpu" title={t("notch.status.cpuUsage")}>
 						<Cpu size={12} strokeWidth={2} />
 						<span className="label">{cpuUsage}%</span>
 					</>
@@ -3206,10 +3196,8 @@ function App() {
 			case "ram":
 				return statusWidget(
 					"ram",
-					"RAM Usage",
+					t("notch.status.ramUsage"),
 					<>
-				return (
-					<div className="passive-feature" key="ram" title={t("notch.status.ramUsage")}>
 						<MemoryStick size={12} strokeWidth={2} />
 						<span className="label">{Math.round(ramUsage)}%</span>
 					</>
@@ -3217,10 +3205,8 @@ function App() {
 			case "disk":
 				return statusWidget(
 					"disk",
-					"Free Disk Space",
+					t("notch.status.freeDiskSpace"),
 					<>
-				return (
-					<div className="passive-feature" key="disk" title={t("notch.status.freeDiskSpace")}>
 						<HardDrive size={12} strokeWidth={2} />
 						<span className="label">{diskSpace}GB</span>
 					</>
@@ -3228,10 +3214,8 @@ function App() {
 			case "net":
 				return statusWidget(
 					"net",
-					"Network Speed",
+					t("notch.status.networkSpeed"),
 					<>
-				return (
-					<div className="passive-feature" key="net" title={t("notch.status.networkSpeed")}>
 						<ArrowUpDown size={12} strokeWidth={2} />
 						<span className="label">
 							↑{formatBytes(netUpSpeed)} ↓{formatBytes(netDownSpeed)}
@@ -4152,7 +4136,6 @@ function App() {
 														toggleWifi();
 													}}
 													onContextMenu={handleWifiRightClick}
-													title="Left-click to toggle, Right-click for networks"
 													title={t("notch.commandCenter.toggleHint")}
 												>
 													<div className="cc-pill-icon-wrapper">
@@ -4166,9 +4149,7 @@ function App() {
 																: !wifiEnabled
 																	? t("notch.commandCenter.off")
 																	: wifiConnected
-																		? (wifiStatus?.ssid ?? "Connected")
-																		: "Not connected"}
-																		? t("notch.commandCenter.connected")
+																		? (wifiStatus?.ssid ?? t("notch.commandCenter.connected"))
 																		: t("notch.commandCenter.notConnected")}
 														</span>
 													</div>
@@ -4220,7 +4201,6 @@ function App() {
 														toggleBluetooth();
 													}}
 													onContextMenu={handleBluetoothRightClick}
-													title="Left-click to toggle, Right-click for devices"
 													title={t("notch.commandCenter.toggleHint")}
 												>
 													<div className="cc-pill-icon-wrapper">
@@ -4295,11 +4275,6 @@ function App() {
 														);
 													}}
 													title="Do Not Disturb — Open Windows notification settings"
-													title={t("notch.commandCenter.focusDnd", {
-														state: dndActive
-															? t("notch.commandCenter.on")
-															: t("notch.commandCenter.off")
-													})}
 												>
 													<MoonIcon />
 												</button>
@@ -4458,8 +4433,6 @@ function App() {
 															<CommandBrightnessIcon />
 														</button>
 														<span>Brightness</span>
-														<BrightnessLowIcon />
-														<span>{t("notch.commandCenter.brightness")}</span>
 													</div>
 													<div className="cc-classic-slider-track">
 														<input
@@ -4627,27 +4600,6 @@ function App() {
 												<button
 													className="announcement-close"
 													onClick={dismissAnnouncement}
-													title="Dismiss"
-												>
-													<X size={13} strokeWidth={2.2} />
-												</button>
-											</div>
-											{announcement.body && (
-												<p className="announcement-body">{announcement.body}</p>
-											)}
-											{announcement.url && (
-												<button
-													className="announcement-link"
-													onClick={() => openUrl(announcement.url!)}
-												>
-													Learn more
-												</button>
-											)}
-										</motion.div>
-									)}
-												<button
-													className="announcement-close"
-													onClick={dismissAnnouncement}
 													title={t("common.dismiss")}
 												>
 													<X size={13} strokeWidth={2.2} />
@@ -4690,17 +4642,16 @@ function App() {
 													<div className="timer-main">
 														<div className="timer-status">
 															{isEditingTimer
-																? "Type to set duration"
-																? t("notch.calendar.setDuration")
-																: isTimerFinished
-																	? t("notch.calendar.timesUp")
-																	: timerEndTime
-																		? timerState === "paused"
-																			? t("notch.calendar.pausedEndsAt", {
-																					time: timerEndTime
-																				})
-																			: t("notch.calendar.endsAt", { time: timerEndTime })
-																		: t("notch.calendar.clickToEdit")}
+															? t("notch.calendar.setDuration")
+															: isTimerFinished
+																? t("notch.calendar.timesUp")
+																: timerEndTime
+																	? timerState === "paused"
+																		? t("notch.calendar.pausedEndsAt", {
+																				time: timerEndTime
+																			})
+																		: t("notch.calendar.endsAt", { time: timerEndTime })
+																	: t("notch.calendar.clickToEdit")}
 														</div>
 
 														<div className={`timer-clock-row ${isEditingTimer ? "editing" : ""}`}>
@@ -4728,10 +4679,7 @@ function App() {
 																	className="timer-edit-input"
 																	type="text"
 																	inputMode="numeric"
-																	aria-label="Set timer duration as minutes and seconds, for example 1230 for 12 minutes 30 seconds"
-																	maxLength={5}
 																	aria-invalid={!timerEditValid}
-																	value={timerEditDigits}
 																	aria-label={t("notch.calendar.timerDurationAria")}
 																	value={formatTimerDigits(timerEditDigits)}
 																	onChange={(e) =>
@@ -4988,60 +4936,6 @@ function App() {
 	);
 }
 
-function Calendar() {
-	const [date] = useState(new Date());
-
-	const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
-	const firstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
-
-	const currentMonth = date.getMonth();
-	const currentYear = date.getFullYear();
-	const monthName = date.toLocaleString(getLocale(), { month: "long" });
-
-	const totalDays = daysInMonth(currentYear, currentMonth);
-	const startDay = firstDayOfMonth(currentYear, currentMonth);
-	const days = [];
-
-	// Padding for start of month
-	for (let i = 0; i < startDay; i++) {
-		days.push(<div key={`empty-${i}`} className="calendar-day empty" />);
-	}
-
-	// Actual days
-	const today = new Date().getDate();
-	const isCurrentMonth =
-		new Date().getMonth() === currentMonth && new Date().getFullYear() === currentYear;
-
-	for (let i = 1; i <= totalDays; i++) {
-		days.push(
-			<div key={i} className={`calendar-day ${isCurrentMonth && i === today ? "today" : ""}`}>
-				{i}
-			</div>
-		);
-	}
-
-	return (
-		<div className="calendar-container">
-			<div className="calendar-header">
-				<span className="month-year">
-					{monthName} {currentYear}
-				</span>
-			</div>
-			<div className="calendar-grid">
-				{Array.from({ length: 7 }, (_, i) =>
-					new Date(2023, 0, 1 + i).toLocaleDateString(getLocale(), {
-						weekday: "narrow"
-					})
-				).map((d, i) => (
-					<div key={`${d}-${i}`} className="day-name">
-						{d}
-					</div>
-				))}
-				{days}
-			</div>
-		</div>
-	);
-}
 
 function BluetoothIcon() {
 	return (

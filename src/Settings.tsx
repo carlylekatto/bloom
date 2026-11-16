@@ -130,7 +130,6 @@ function SettingsApp() {
 			<div className="settings-body">
 				<div className="settings-sidebar">
 					<div className="settings-sidebar-intro"><strong>Bloom</strong><span>Make it yours</span></div>
-					{TABS.map(({ id, label, icon: Icon }) => (
 					{TABS.map(({ id, icon: Icon }) => (
 						<button
 							key={id}
@@ -193,7 +192,6 @@ function SettingsApp() {
 									{t("common.learnMore")}
 								</button>
 							)}
-							<button className="announcement-banner-close" onClick={dismiss} title="Dismiss">
 							<button
 								className="announcement-banner-close"
 								onClick={dismiss}
@@ -204,7 +202,7 @@ function SettingsApp() {
 						</div>
 					)}
 					<div className="settings-page-heading">
-						<h1>{TABS.find((tab) => tab.id === activeTab)?.label}</h1>
+						<h1>{t(`settings.tabs.${activeTab}`)}</h1>
 						<p>{TAB_COPY[activeTab]}</p>
 					</div>
 					<FeaturePreview

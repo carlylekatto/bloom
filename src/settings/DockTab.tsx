@@ -82,16 +82,11 @@ function DrivePicker({
 import { useTranslation } from "../i18n";
 
 const START_ICON_PRESETS = [
-	{ key: "default", src: "/bloom.png", label: "Bloom" },
-	{ key: "bloom-colorful", src: "/bloom-colorful.png", label: "Colorful" },
-	{ key: "bloom-golden", src: "/bloom-golden.png", label: "Golden" },
-	{ key: "bloom-biscuit", src: "/bloom-biscuit.png", label: "Orange" },
-	{ key: "windows", src: "/windows-11.png", label: "Windows" }
 	{ key: "default", src: "/bloom.png", labelKey: "settings.dock.iconBloom" },
 	{ key: "bloom-colorful", src: "/bloom-colorful.png", labelKey: "settings.dock.iconColorful" },
 	{ key: "bloom-golden", src: "/bloom-golden.png", labelKey: "settings.dock.iconGolden" },
 	{ key: "bloom-biscuit", src: "/bloom-biscuit.png", labelKey: "settings.dock.iconOrange" },
-	{ key: "windows", src: "/windows.png", labelKey: "settings.dock.iconWindows" }
+	{ key: "windows", src: "/windows-11.png", labelKey: "settings.dock.iconWindows" }
 ];
 
 const startIconTileStyle = (active: boolean): CSSProperties => ({
@@ -256,7 +251,6 @@ export function DockTab({
 							</SettingRow>
 						)}
 
-						<SettingRow icon={Eye} label="Show App Previews" desc="Show window thumbnails on hover">
 						<SettingRow
 							icon={Eye}
 							label={t("settings.dock.previews")}
@@ -270,17 +264,13 @@ export function DockTab({
 
 						<SettingRow
 							icon={Layers}
-							label="Show Background Apps"
-							desc="Keep apps in the dock when they close to the system tray"
-							icon={Circle}
-							label={t("settings.dock.iconOnly")}
-							desc={t("settings.dock.iconOnlyDesc")}
-							divider={false}
+							label={t("settings.dock.backgroundApps")}
+							desc={t("settings.dock.backgroundAppsDesc")}
 						>
 							<label className="toggle-switch">
 								<input
 									type="checkbox"
-									aria-label="Show Background Apps"
+									aria-label={t("settings.dock.backgroundApps")}
 									checked={dockShowBackgroundApps}
 									onChange={toggleDockShowBackgroundApps}
 								/>
@@ -288,7 +278,12 @@ export function DockTab({
 							</label>
 						</SettingRow>
 
-						<SettingRow icon={Circle} label="Icon Only" desc="Remove icon background and padding">
+						<SettingRow
+							icon={Circle}
+							label={t("settings.dock.iconOnly")}
+							desc={t("settings.dock.iconOnlyDesc")}
+							divider={false}
+						>
 							<label className="toggle-switch">
 								<input type="checkbox" checked={dockIconOnly} onChange={toggleDockIconOnly} />
 								<span className="slider"></span>

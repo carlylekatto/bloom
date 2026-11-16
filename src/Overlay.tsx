@@ -19,124 +19,6 @@ import { initTheme } from "./theme";
 import { Onboarding } from "./components/Onboarding";
 import { createRegionSender, measureElements, type RegionRect } from "./windowRegion";
 
-// ─── App Volume Mixer ───────────────────────────────────────────────────────
-
-interface AudioSession {
-	pid: number;
-	name: string;
-	process_path: string | null;
-	volume: number;
-	is_muted: boolean;
-}
-
-function MixerTile({
-	session,
-	onVolumeChange,
-	onMuteToggle,
-	draggingRef
-}: {
-	session: AudioSession;
-	onVolumeChange: (pid: number, volume: number) => void;
-	onMuteToggle: (pid: number) => void;
-	draggingRef: { current: number | null };
-}) {
-	const { t } = useTranslation();
-	const [icon, setIcon] = useState<string | null>(null);
-	const [showPercentage, setShowPercentage] = useState(false);
-	const barRef = useRef<HTMLDivElement>(null);
-	const percentageTimeoutRef = useRef<any>(null);
-	const lastPercentageRef = useRef<number | null>(null);
-
-	useEffect(() => {
-		if (!session.process_path) return;
-		let alive = true;
-		invoke<string | null>("get_app_icon", {
-			path: session.process_path,
-			name: session.name,
-			hwnd: null
-		})
-			.then((data) => {
-				if (alive) setIcon(data);
-			})
-			.catch(() => {});
-		return () => {
-			alive = false;
-		};
-	}, [session.process_path, session.name]);
-
-	const percentage = Math.round((session.is_muted ? 0 : session.volume) * 100);
-
-	// Flash the percentage in place of the app logo while its volume changes,
-	// matching the main notch's action button.
-	useEffect(() => {
-		const previous = lastPercentageRef.current;
-		lastPercentageRef.current = percentage;
-		if (previous === null || previous === percentage) return;
-		setShowPercentage(true);
-		if (percentageTimeoutRef.current) clearTimeout(percentageTimeoutRef.current);
-		percentageTimeoutRef.current = setTimeout(() => setShowPercentage(false), 1200);
-		return () => {
-			if (percentageTimeoutRef.current) clearTimeout(percentageTimeoutRef.current);
-		};
-	}, [percentage]);
-
-	const volumeFromY = (clientY: number) => {
-		if (!barRef.current) return;
-		const rect = barRef.current.getBoundingClientRect();
-		const relativeY = rect.bottom - clientY;
-		onVolumeChange(session.pid, Math.max(0, Math.min(1, relativeY / rect.height)));
-	};
-
-	const handleMouseDown = (e: React.MouseEvent) => {
-		draggingRef.current = session.pid;
-		volumeFromY(e.clientY);
-		const handleMouseMove = (moveE: MouseEvent) => volumeFromY(moveE.clientY);
-		const handleMouseUp = () => {
-			draggingRef.current = null;
-			document.removeEventListener("mousemove", handleMouseMove);
-			document.removeEventListener("mouseup", handleMouseUp);
-		};
-		document.addEventListener("mousemove", handleMouseMove);
-		document.addEventListener("mouseup", handleMouseUp);
-	};
-
-	return (
-		<div className="volume-mixer-tile">
-			<div
-				ref={barRef}
-				className="volume-mixer-bar"
-				onMouseDown={handleMouseDown}
-				onTouchStart={(e) => volumeFromY(e.touches[0].clientY)}
-				title={`${session.name} — ${percentage}%`}
-				style={{ cursor: "pointer" }}
-			>
-				<motion.div
-					className="volume-mixer-fill"
-					initial={false}
-					animate={{ height: `${percentage}%` }}
-					transition={{ type: "spring", stiffness: 300, damping: 35 }}
-				/>
-			</div>
-			<button
-				className={`volume-mixer-action ${session.is_muted ? "muted" : ""} ${
-					showPercentage ? "showing-percent" : ""
-				}`}
-				onClick={() => onMuteToggle(session.pid)}
-				title={session.is_muted ? t("overlay.volume.unmute") : t("overlay.volume.mute")}
-			>
-				{icon ? (
-					<img src={icon} alt="" draggable={false} />
-				) : (
-					<span className="volume-mixer-action-fallback">
-						{session.name.charAt(0).toUpperCase()}
-					</span>
-				)}
-				<span className="volume-mixer-action-pct">{percentage}%</span>
-			</button>
-		</div>
-	);
-}
-
 // ─── Volume Notch ───────────────────────────────────────────────────────────
 
 // A HUD card's size in CSS px before `bloom-scale`; the backend's edge
@@ -158,6 +40,7 @@ function VolumeNotch({
 	onMixerExpandedChange: (expanded: boolean) => void;
 }) {
 	const { t } = useTranslation();
+
 	const percentage = Math.round(volume * 100);
 	const barRef = useRef<HTMLDivElement>(null);
 	const shellRef = useRef<HTMLDivElement>(null);
@@ -323,29 +206,6 @@ function VolumeNotch({
 						>
 							<div className="volume-mixer-slot">
 								<AudioMixer active={mixerExpanded} onWidthChange={setMixerWidth} />
-							<div
-								className="volume-mixer-list"
-								style={{ gridTemplateColumns: `repeat(${mixerColumns}, 1fr)` }}
-							>
-								{sessions.length === 0 ? (
-									<div className="volume-mixer-empty">
-										{!sessionsLoaded
-											? t("overlay.volume.loading")
-											: sessionsError
-												? t("overlay.volume.sessionsError")
-												: t("overlay.volume.noApps")}
-									</div>
-								) : (
-									sessions.map((session) => (
-										<MixerTile
-											key={session.pid}
-											session={session}
-											onVolumeChange={handleAppVolumeChange}
-											onMuteToggle={handleAppMuteToggle}
-											draggingRef={draggingRef}
-										/>
-									))
-								)}
 							</div>
 						</motion.div>
 					)}
@@ -461,7 +321,6 @@ function BrightnessNotch({
 
 function OverlayApp() {
 	const { t } = useTranslation();
-
 	useEffect(() => {
 		return initTheme();
 	}, []);
@@ -556,7 +415,6 @@ function OverlayApp() {
 		invoke("load_settings")
 			.then(async (settings: any) => {
 				if (await reloadIfMirrorWasStale(settings)) return;
-				setLocale(resolveLanguage(settings?.["bloom-language"] ?? null));
 				if (settings && settings["bloom-scale"] !== undefined) {
 					setScale(parseFloat(settings["bloom-scale"]));
 				}
@@ -736,8 +594,8 @@ function OverlayApp() {
 		"bloom-volume-edge-enabled": setVolumeEdgeEnabled,
 		"bloom-brightness-overlay-enabled": setBrightnessOverlayEnabled,
 		"bloom-brightness-edge-enabled": setBrightnessEdgeEnabled,
-		"bloom-scale": setScale,
-		"bloom-language": (value) => setLocale(resolveLanguage(String(value)))
+		"bloom-language": (value) => setLocale(resolveLanguage(String(value))),
+		"bloom-scale": setScale
 	});
 
 	// Only a HUD card makes the overlay's edge rects clickable (services.rs).

@@ -28,17 +28,6 @@ import { driveLetter, hideDrive, removeCustomFolder, type DockExtra } from "./do
 import { createRegionSender, measureElements, padRect, type RegionRect } from "./windowRegion";
 import { resolveLanguage, setLocale, useTranslation } from "./i18n";
 
-interface AppInfo {
-	name: string;
-	path: string;
-	icon: string | null;
-	is_running: boolean;
-	is_pinned?: boolean;
-	hwnd?: number;
-	executable?: string;
-	all_hwnds?: [number, string][];
-}
-
 // Host processes (Edge/Chrome/Brave/ApplicationFrameHost) run every PWA/UWP
 // window, so their window title must be part of their identity — otherwise two
 // PWAs running under the same browser collapse into a single dock item.
@@ -438,7 +427,6 @@ const Dock = memo(function Dock() {
 				});
 			}
 		};
-		};
 
 		updateDockRectRef.current = updateRect;
 		updateRect();
@@ -461,7 +449,6 @@ const Dock = memo(function Dock() {
 		const content = dockRef.current?.querySelector(".dock-reorder-container");
 		if (content) observer.observe(content);
 
-		return () => {
 		return () => {
 			updateDockRectRef.current = () => {};
 			clearTimeout(settle);
@@ -599,8 +586,7 @@ const Dock = memo(function Dock() {
 		"bloom-dock-extras-recycle-bin": () => setDockExtrasRevision((r) => r + 1),
 		"bloom-dock-extras-hidden-drives": () => setDockExtrasRevision((r) => r + 1),
 		"bloom-dock-extras-folders": () => setDockExtrasRevision((r) => r + 1),
-		"bloom-dock-extras-custom-folders": () => setDockExtrasRevision((r) => r + 1)
-		"bloom-scale": setScale,
+		"bloom-dock-extras-custom-folders": () => setDockExtrasRevision((r) => r + 1),
 		"bloom-language": (value) => setLocale(resolveLanguage(String(value)))
 	});
 
@@ -2686,11 +2672,6 @@ function AddAppPopup({
 							</div>
 						))
 					) : (
-						<div className="popup-empty">
-							{debouncedSearch.trim()
-								? "No results"
-								: "Running apps show up here — search to pin anything else"}
-						</div>
 						<div className="popup-empty">{t("dock.addApp.noResults")}</div>
 					)}
 				</div>

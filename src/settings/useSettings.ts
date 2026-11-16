@@ -1004,13 +1004,6 @@ export function useSettings() {
 		setExportStatus("exporting");
 		try {
 			const filePath = await invoke<string | null>("export_settings_to_file");
-			const { save: saveDialog } = await import("@tauri-apps/plugin-dialog");
-			const settingsJson = await invoke<string>("export_settings");
-			const filePath = await saveDialog({
-				title: t("settings.dialogs.exportTitle"),
-				defaultPath: "bloom-settings.json",
-				filters: [{ name: "JSON", extensions: ["json"] }]
-			});
 			if (filePath) {
 				setExportStatus("success");
 				setTimeout(() => setExportStatus("idle"), 2000);
@@ -1028,12 +1021,6 @@ export function useSettings() {
 		setImportStatus("importing");
 		try {
 			const filePath = await invoke<string | null>("import_settings_from_file");
-			const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
-			const filePath = await openDialog({
-				title: t("settings.dialogs.importTitle"),
-				filters: [{ name: "JSON", extensions: ["json"] }],
-				multiple: false
-			});
 			if (filePath) {
 				await loadAllSettings();
 				setImportStatus("success");
