@@ -5211,9 +5211,6 @@ mod tests {
         assert!(cache.contains_key(&19));
         assert!((0..5).all(|key| !cache.contains_key(&key)));
     }
-    use super::{
-        is_helper_name, is_launchable_entry, notch_mode_reserves_work_area, win_number_index,
-    };
 
     #[test]
     fn win_number_maps_top_row_digits_only() {

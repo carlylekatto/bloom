@@ -79,6 +79,7 @@ This page is generated from the [current English catalog](../src/i18n/locales/en
 | `settings.general.language` | Language |
 | `settings.general.languageDesc` | Bloom's display language |
 | `settings.general.languageSystem` | System default |
+| `settings.general.languageFallbackDesc` | Untranslated text uses English. Community translations may be incomplete. |
 | `settings.general.launchAtLogin` | Launch at Login |
 | `settings.general.launchAtLoginDesc` | Open Bloom automatically |
 | `settings.general.updateIndicator` | Update Indicator |
@@ -93,7 +94,6 @@ This page is generated from the [current English catalog](../src/i18n/locales/en
 | `settings.general.restartDesc` | Reinitialize all components |
 | `settings.general.quit` | Quit Bloom |
 | `settings.general.quitDesc` | Exit application completely |
-| `settings.general.languageFallbackDesc` | Untranslated text uses English. Community translations may be incomplete. |
 
 ## Settings → Appearance
 
@@ -145,6 +145,8 @@ This page is generated from the [current English catalog](../src/i18n/locales/en
 | `settings.dock.iconGolden` | Golden |
 | `settings.dock.iconOrange` | Orange |
 | `settings.dock.iconWindows` | Windows |
+| `settings.dock.showTrayApps` | Show Background Apps |
+| `settings.dock.showTrayAppsDesc` | Keep apps that close to the tray visible in the dock. Off matches the Windows taskbar, which hides them behind the tray overflow. |
 
 ## Settings → Notch
 

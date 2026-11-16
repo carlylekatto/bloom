@@ -656,7 +656,6 @@ unsafe fn find_overflow_icon(
         }
         return Err("Bloom could not uniquely identify this app's Windows tray icon.".into());
     }
-    }
     // Name matches provide cross-checks of Explorer's ordered UI tree, but
     // cannot be required for every icon because tooltip text is app-defined.
     // An icon without a name (an app with no tooltip, or one that just
@@ -673,7 +672,6 @@ unsafe fn find_overflow_icon(
         };
         if index != button_index && matches.next().is_none() {
             return Err("Windows tray icon order changed. Please try again.".into());
-        }
         }
     }
     buttons.remove(position).cast().map_err(|e| e.to_string())

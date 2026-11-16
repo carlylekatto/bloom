@@ -2429,6 +2429,13 @@ pub fn set_overlay_hud(up: bool) {
     crate::state::OVERLAY_HUD_UP.store(up, Ordering::Relaxed);
 }
 
+/// Re-syncs the overlay's position and visibility: used by the onboarding guide
+/// and by the dock when it moves, so the overlay stays on the notch/dock edge.
+#[tauri::command]
+pub fn sync_overlay_position(app: AppHandle) {
+    crate::services::sync_overlays(&app);
+}
+
 /// Positions the overlay and shows it without activating it: a HUD popping up
 /// must never take focus from the app being typed in. Tauri's own show() uses
 /// SW_SHOW after the first time; once the window is visible that call is a
