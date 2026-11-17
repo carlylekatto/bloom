@@ -83,7 +83,10 @@
 			"scale": "UI & Font Scale",
 			"scaleDesc": "Adjust desktop size ({{percent}}%)",
 			"decreaseScale": "Decrease Scale",
-			"increaseScale": "Increase Scale"
+			"increaseScale": "Increase Scale",
+			"edgeShine": "Edge shine",
+			"edgeShineDesc": "Soft reflections around the dock and notch. Turn off if animations feel less smooth.",
+			"hexColor": "Hex colour"
 		},
 		"dock": {
 			"enabled": "Bloom Dock",

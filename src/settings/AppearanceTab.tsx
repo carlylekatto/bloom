@@ -144,9 +144,9 @@ export function AppearanceTab({
 
 			<div className="setting-group-label">{t("settings.groups.display")}</div>
 			<div className="setting-group">
-				<SettingRow icon={Sparkles} label="Edge shine" desc="Soft reflections around the dock and notch. Turn off if animations feel less smooth.">
+				<SettingRow icon={Sparkles} label={t("settings.appearance.edgeShine")} desc={t("settings.appearance.edgeShineDesc")}>
 					<label className="toggle-switch">
-						<input type="checkbox" aria-label="Edge shine" checked={edgeShineEnabled} onChange={toggleEdgeShine} />
+						<input type="checkbox" aria-label={t("settings.appearance.edgeShine")} checked={edgeShineEnabled} onChange={toggleEdgeShine} />
 						<span className="slider"></span>
 					</label>
 				</SettingRow>
@@ -196,6 +196,7 @@ export function AppearanceTab({
 /** A typed hex code: #RGB or #RRGGBB, with or without the #. Applied on Enter
  *  or leaving the field; anything else snaps back to the current colour. */
 function HexInput({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
+	const { t } = useTranslation();
 	const [draft, setDraft] = useState(value.toUpperCase());
 	useEffect(() => setDraft(value.toUpperCase()), [value]);
 	const commit = () => {
@@ -213,7 +214,7 @@ function HexInput({ value, onChange }: { value: string; onChange: (hex: string) 
 			value={draft}
 			maxLength={7}
 			spellCheck={false}
-			aria-label="Hex colour"
+			aria-label={t("settings.appearance.hexColor")}
 			onChange={(e) => setDraft(e.target.value)}
 			onBlur={commit}
 			onKeyDown={(e) => {

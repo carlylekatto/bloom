@@ -119,6 +119,9 @@ This page is generated from the [current English catalog](../src/i18n/locales/en
 | `settings.appearance.scaleDesc` | Adjust desktop size ({{percent}}%) |
 | `settings.appearance.decreaseScale` | Decrease Scale |
 | `settings.appearance.increaseScale` | Increase Scale |
+| `settings.appearance.edgeShine` | Edge shine |
+| `settings.appearance.edgeShineDesc` | Soft reflections around the dock and notch. Turn off if animations feel less smooth. |
+| `settings.appearance.hexColor` | Hex colour |
 
 ## Settings → Dock
 
