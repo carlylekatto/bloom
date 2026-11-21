@@ -1056,14 +1056,75 @@ fn restore_rect_on_monitor(
     shift_rect(on_screen_restore_rect(on_screen, target.rcWork), (-dx, -dy))
 }
 
+/// Orders a dock item's windows by focus recency while preserving the stable
+/// preview order for windows with the same (or no) focus timestamp.
+fn order_windows_by_focus(
+    hwnds: &[isize],
+    focus_times: &HashMap<isize, i64>,
+) -> Vec<isize> {
+    let mut ordered = hwnds.to_vec();
+    ordered.sort_by(|a, b| {
+        let focused_at_a = focus_times.get(a).copied().unwrap_or(0);
+        let focused_at_b = focus_times.get(b).copied().unwrap_or(0);
+        focused_at_b.cmp(&focused_at_a)
+    });
+    ordered
+}
+
+/// What a grouped dock-item click should do with one of the app's windows.
+#[derive(Debug, PartialEq, Eq)]
+enum GroupedFocusAction {
+    Minimize(isize),
+    Restore(isize),
+}
+
+/// Chooses between toggling the active group member and restoring a window.
+/// An iconic or hidden active member must be restored, not treated as a
+/// successful minimize followed by an early return.
+fn grouped_focus_action(
+    active: Option<(isize, bool, bool)>,
+    fallback: isize,
+) -> GroupedFocusAction {
+    match active {
+        Some((hwnd, true, false)) => GroupedFocusAction::Minimize(hwnd),
+        Some((hwnd, _, _)) => GroupedFocusAction::Restore(hwnd),
+        None => GroupedFocusAction::Restore(fallback),
+    }
+}
+
+/// A remembered foreground window and whether the HWND still exists.
+#[derive(Debug, Clone, Copy)]
+struct FocusCandidate {
+    hwnd: isize,
+    focused_at: i64,
+    exists: bool,
+}
+
+/// The newest remembered window whose HWND still exists. A destroyed HWND
+/// must not hide an older valid entry, but an existing minimized window stays
+/// the MRU member so a grouped click can restore it.
+fn most_recent_existing_window(candidates: &[FocusCandidate]) -> Option<isize> {
+    candidates
+        .iter()
+        .filter(|candidate| candidate.exists)
+        .max_by_key(|candidate| candidate.focused_at)
+        .map(|candidate| candidate.hwnd)
+}
+
 /// The window outside Bloom that most recently became the foreground window.
 fn last_focused_window() -> Option<HWND> {
+    use windows::Win32::UI::WindowsAndMessaging::IsWindow;
+
     let map = crate::state::FOCUS_TIMESTAMPS.get()?.lock().ok()?;
-    let (&last, _) = map.iter().max_by_key(|(_, &at)| at)?;
-    let last = HWND(last as *mut _);
-    unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(last)) }
-        .as_bool()
-        .then_some(last)
+    let candidates: Vec<_> = map
+        .iter()
+        .map(|(&hwnd, &at)| FocusCandidate {
+            hwnd,
+            focused_at: at,
+            exists: unsafe { IsWindow(Some(HWND(hwnd as *mut _))).as_bool() },
+        })
+        .collect();
+    most_recent_existing_window(&candidates).map(|hwnd| HWND(hwnd as *mut _))
 }
 
 #[tauri::command]
@@ -1130,8 +1191,8 @@ pub async fn focus_window(app: AppHandle, hwnd: isize) -> bool {
 }
 
 /// Brings one window of a multi-window dock item forward, like the taskbar's
-/// Win+number button. `hwnds` comes most-recently-focused first: when none of
-/// them is in front, that one is activated.
+/// Win+number button. `hwnds` keeps the stable preview order; focus recency
+/// is resolved here so activating a group does not depend on that order.
 ///
 /// When one of the app's windows *is* in front the click minimizes it, as the
 /// taskbar's button does, so a multi-window app keeps the same hide/show toggle
@@ -1148,9 +1209,16 @@ pub async fn focus_app_windows(app: AppHandle, hwnds: Vec<isize>) {
             GetAncestor, GetForegroundWindow, IsIconic, IsWindow, IsWindowVisible,
             SetForegroundWindow, ShowWindow, GA_ROOTOWNER, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
         };
-        let Some(&most_recent) = hwnds.first() else {
+        if hwnds.is_empty() {
             return;
-        };
+        }
+
+        let focus_times = crate::state::FOCUS_TIMESTAMPS
+            .get()
+            .and_then(|map| map.lock().ok())
+            .map(|map| map.clone())
+            .unwrap_or_default();
+        let ordered = order_windows_by_focus(&hwnds, &focus_times);
 
         let mut foreground = GetForegroundWindow();
         // Clicking the dock can make it the foreground window for a moment.
@@ -1161,30 +1229,40 @@ pub async fn focus_app_windows(app: AppHandle, hwnds: Vec<isize>) {
             }
         }
 
-        let active = hwnds
-            .iter()
-            .map(|&h| HWND(h as *mut _))
-            .find(|h| foreground == *h || GetAncestor(foreground, GA_ROOTOWNER) == *h);
-
-        if let Some(active) = active {
-            if IsWindow(Some(active)).as_bool()
-                && IsWindowVisible(active).as_bool()
-                && !IsIconic(active).as_bool()
-            {
-                let _ = ShowWindow(active, SW_MINIMIZE);
+        let root_owner = GetAncestor(foreground, GA_ROOTOWNER);
+        let active = ordered.iter().copied().find_map(|hwnd| {
+            let hwnd = HWND(hwnd as *mut _);
+            if !IsWindow(Some(hwnd)).as_bool() {
+                return None;
             }
+            (foreground == hwnd || root_owner == hwnd).then_some((
+                hwnd.0 as isize,
+                IsWindowVisible(hwnd).as_bool(),
+                IsIconic(hwnd).as_bool(),
+            ))
+        });
+        let Some(fallback) = ordered.iter().copied().find(|&hwnd| {
+            IsWindow(Some(HWND(hwnd as *mut _))).as_bool()
+        }) else {
             return;
-        }
+        };
 
-        let hwnd = HWND(most_recent as *mut _);
-        if !IsWindowVisible(hwnd).as_bool() {
-            let _ = ShowWindow(hwnd, SW_SHOW);
+        match grouped_focus_action(active, fallback) {
+            GroupedFocusAction::Minimize(hwnd) => {
+                let _ = ShowWindow(HWND(hwnd as *mut _), SW_MINIMIZE);
+            }
+            GroupedFocusAction::Restore(hwnd) => {
+                let hwnd = HWND(hwnd as *mut _);
+                if !IsWindowVisible(hwnd).as_bool() {
+                    let _ = ShowWindow(hwnd, SW_SHOW);
+                }
+                if IsIconic(hwnd).as_bool() {
+                    bring_restore_position_on_screen(hwnd);
+                    let _ = ShowWindow(hwnd, SW_RESTORE);
+                }
+                let _ = SetForegroundWindow(hwnd);
+            }
         }
-        if IsIconic(hwnd).as_bool() {
-            bring_restore_position_on_screen(hwnd);
-            let _ = ShowWindow(hwnd, SW_RESTORE);
-        }
-        let _ = SetForegroundWindow(hwnd);
     })
     .await
     .unwrap_or_default();
@@ -4464,6 +4542,109 @@ mod restore_rect_tests {
         assert_eq!(
             on_screen_restore_rect(rect(-32000, -32000, 3000, 2000), work),
             work
+        );
+    }
+}
+
+#[cfg(test)]
+mod grouped_focus_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn orders_group_windows_by_focus_recency_not_preview_order() {
+        let focus_times = HashMap::from([(10, 100), (20, 200)]);
+        assert_eq!(
+            order_windows_by_focus(&[10, 20], &focus_times),
+            vec![20, 10]
+        );
+    }
+
+    #[test]
+    fn keeps_preview_order_as_the_focus_tie_breaker() {
+        let focus_times = HashMap::from([(10, 100), (20, 100)]);
+        assert_eq!(
+            order_windows_by_focus(&[10, 20], &focus_times),
+            vec![10, 20]
+        );
+    }
+
+    #[test]
+    fn keeps_preview_order_when_no_window_has_focus_history() {
+        assert_eq!(
+            order_windows_by_focus(&[10, 20], &HashMap::new()),
+            vec![10, 20]
+        );
+    }
+
+    #[test]
+    fn minimizes_a_visible_active_window() {
+        assert_eq!(
+            grouped_focus_action(Some((10, true, false)), 20),
+            GroupedFocusAction::Minimize(10)
+        );
+    }
+
+    #[test]
+    fn restores_an_active_window_that_was_minimized() {
+        assert_eq!(
+            grouped_focus_action(Some((10, true, true)), 20),
+            GroupedFocusAction::Restore(10)
+        );
+    }
+
+    #[test]
+    fn restores_an_active_window_that_is_hidden() {
+        assert_eq!(
+            grouped_focus_action(Some((10, false, false)), 20),
+            GroupedFocusAction::Restore(10)
+        );
+    }
+
+    #[test]
+    fn restores_the_most_recent_window_when_none_is_active() {
+        assert_eq!(
+            grouped_focus_action(None, 20),
+            GroupedFocusAction::Restore(20)
+        );
+    }
+
+    #[test]
+    fn ignores_a_destroyed_newest_focus_entry() {
+        let candidates = [
+            FocusCandidate {
+                hwnd: 10,
+                focused_at: 200,
+                exists: false,
+            },
+            FocusCandidate {
+                hwnd: 20,
+                focused_at: 100,
+                exists: true,
+            },
+        ];
+        assert_eq!(most_recent_existing_window(&candidates), Some(20));
+    }
+
+    #[test]
+    fn restores_the_newer_minimized_member_instead_of_minimizing_an_older_visible_member() {
+        let candidates = [
+            FocusCandidate {
+                hwnd: 10,
+                focused_at: 200,
+                exists: true,
+            },
+            FocusCandidate {
+                hwnd: 20,
+                focused_at: 100,
+                exists: true,
+            },
+        ];
+        let last = most_recent_existing_window(&candidates);
+        assert_eq!(last, Some(10));
+        assert_eq!(
+            grouped_focus_action(Some((10, true, true)), 20),
+            GroupedFocusAction::Restore(10)
         );
     }
 }
