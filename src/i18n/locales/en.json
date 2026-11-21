@@ -266,6 +266,8 @@
 			"dockMode": "Dock Mode",
 			"cycleDockMode": "Cycle dock mode: {{fixed}} / {{smart}} / {{peek}}",
 			"bluetooth": "Bluetooth",
+			"bluetoothConnected_one": "{{count}} connected",
+			"bluetoothConnected_other": "{{count}} connected",
 			"notchMode": "Notch Mode",
 			"cycleNotchMode": "Cycle notch mode: {{fixed}} / {{smart}} / {{peek}}",
 			"focusDnd": "Focus / DND: {{state}}",

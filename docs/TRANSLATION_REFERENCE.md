@@ -345,6 +345,8 @@ This page is generated from the [current English catalog](../src/i18n/locales/en
 | `notch.commandCenter.dockMode` | Dock Mode |
 | `notch.commandCenter.cycleDockMode` | Cycle dock mode: {{fixed}} / {{smart}} / {{peek}} |
 | `notch.commandCenter.bluetooth` | Bluetooth |
+| `notch.commandCenter.bluetoothConnected_one` | {{count}} connected |
+| `notch.commandCenter.bluetoothConnected_other` | {{count}} connected |
 | `notch.commandCenter.notchMode` | Notch Mode |
 | `notch.commandCenter.cycleNotchMode` | Cycle notch mode: {{fixed}} / {{smart}} / {{peek}} |
 | `notch.commandCenter.focusDnd` | Focus / DND: {{state}} |

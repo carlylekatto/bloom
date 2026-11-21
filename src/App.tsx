@@ -4236,15 +4236,15 @@ function App() {
 														</span>
 														<span className="cc-pill-status">
 															{!bluetoothEnabled
-																? "Off"
+																? t("notch.commandCenter.off")
 																: btConnectedNames.length === 1
 																	? btConnectedNames[0]
 																	: btConnectedNames.length > 1
-																		? `${btConnectedNames.length} connected`
-																		: "On"}
-															{bluetoothEnabled
-																? t("notch.commandCenter.on")
-																: t("notch.commandCenter.off")}
+																		? tCount(
+																				"notch.commandCenter.bluetoothConnected",
+																				btConnectedNames.length
+																			)
+																		: t("notch.commandCenter.on")}
 														</span>
 													</div>
 													<button
