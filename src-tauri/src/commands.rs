@@ -1130,29 +1130,53 @@ pub async fn focus_window(app: AppHandle, hwnd: isize) -> bool {
 }
 
 /// Brings one window of a multi-window dock item forward, like the taskbar's
-/// Win+number / Ctrl+click. `hwnds` comes most-recently-focused first: with
-/// none of them in front, that one is activated; with one in front, the next
-/// window in a stable order is, so repeated clicks visit every window instead
-/// of flipping between the two most recent.
+/// Win+number button. `hwnds` comes most-recently-focused first: when none of
+/// them is in front, that one is activated.
+///
+/// When one of the app's windows *is* in front the click minimizes it, as the
+/// taskbar's button does, so a multi-window app keeps the same hide/show toggle
+/// a single-window app has. Popups and dialogs the window owns count as the
+/// window itself, like `focus_window`.
 #[tauri::command]
-pub async fn focus_app_windows(hwnds: Vec<isize>) {
+pub async fn focus_app_windows(app: AppHandle, hwnds: Vec<isize>) {
+    let dock = app
+        .get_webview_window("dock")
+        .and_then(|window| window.hwnd().ok())
+        .map(|dock| dock.0 as isize);
     tauri::async_runtime::spawn_blocking(move || unsafe {
         use windows::Win32::UI::WindowsAndMessaging::{
-            GetForegroundWindow, IsIconic, IsWindowVisible, SetForegroundWindow, ShowWindow,
-            SW_RESTORE, SW_SHOW,
+            GetAncestor, GetForegroundWindow, IsIconic, IsWindow, IsWindowVisible,
+            SetForegroundWindow, ShowWindow, GA_ROOTOWNER, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
         };
         let Some(&most_recent) = hwnds.first() else {
             return;
         };
-        let foreground = GetForegroundWindow().0 as isize;
-        let mut ring = hwnds.clone();
-        ring.sort_unstable();
-        let target = match ring.iter().position(|&h| h == foreground) {
-            Some(i) => ring[(i + 1) % ring.len()],
-            None => most_recent,
-        };
 
-        let hwnd = HWND(target as *mut _);
+        let mut foreground = GetForegroundWindow();
+        // Clicking the dock can make it the foreground window for a moment.
+        // The window in front is then the one focused last before the click.
+        if dock == Some(foreground.0 as isize) {
+            if let Some(last) = last_focused_window() {
+                foreground = last;
+            }
+        }
+
+        let active = hwnds
+            .iter()
+            .map(|&h| HWND(h as *mut _))
+            .find(|h| foreground == *h || GetAncestor(foreground, GA_ROOTOWNER) == *h);
+
+        if let Some(active) = active {
+            if IsWindow(Some(active)).as_bool()
+                && IsWindowVisible(active).as_bool()
+                && !IsIconic(active).as_bool()
+            {
+                let _ = ShowWindow(active, SW_MINIMIZE);
+            }
+            return;
+        }
+
+        let hwnd = HWND(most_recent as *mut _);
         if !IsWindowVisible(hwnd).as_bool() {
             let _ = ShowWindow(hwnd, SW_SHOW);
         }

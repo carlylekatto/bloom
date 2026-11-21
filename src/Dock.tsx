@@ -809,7 +809,8 @@ const Dock = memo(function Dock() {
 			} else if (app.is_background) {
 				await invoke("activate_tray_icon", { trayId: backgroundTrayId(app) });
 			} else if (app.all_hwnds && app.all_hwnds.length > 1) {
-				// Several windows: bring the most recent forward, then cycle.
+				// Several windows: bring the front one forward, or minimize it
+				// when it is already in front, like the taskbar's button.
 				await invoke("focus_app_windows", { hwnds: app.all_hwnds.map(([hwnd]) => hwnd) });
 			} else if (app.hwnd) {
 				await invoke("focus_window", { hwnd: app.hwnd });
@@ -1689,11 +1690,17 @@ const Dock = memo(function Dock() {
 																		<div
 																			key={prev.hwnd}
 																			className="preview-item"
-																			onClick={() =>
+																			onClick={(e) => {
+																				// The thumbnail lives inside the dock item, whose
+																				// own click handler focuses the app too. Both
+																				// firing would restore and minimize the same
+																				// window at once, which leaves Chromium showing
+																				// a stale frame.
+																				e.stopPropagation();
 																				invoke("focus_window", {
 																					hwnd: prev.hwnd
-																				})
-																			}
+																				});
+																			}}
 																		>
 																			<img
 																				src={prev.image}
@@ -1863,11 +1870,17 @@ const Dock = memo(function Dock() {
 																<div
 																	key={prev.hwnd}
 																	className="preview-item"
-																	onClick={() =>
+																	onClick={(e) => {
+																		// The thumbnail lives inside the dock item, whose
+																		// own click handler focuses the app too. Both
+																		// firing would restore and minimize the same
+																		// window at once, which leaves Chromium showing
+																		// a stale frame.
+																		e.stopPropagation();
 																		invoke("focus_window", {
 																			hwnd: prev.hwnd
-																		})
-																	}
+																		});
+																	}}
 																>
 																	<img
 																		src={prev.image}
