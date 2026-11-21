@@ -2510,7 +2510,7 @@ unsafe extern "system" fn capture_ui_enum_proc(hwnd: HWND, lparam: LPARAM) -> BO
             GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
         };
         use windows::Win32::UI::WindowsAndMessaging::{
-            GetWindowLongW, GetWindowRect, GWL_EXSTYLE, GWL_STYLE, WS_CAPTION, WS_EX_TRANSPARENT,
+            GetWindowLongW, GetWindowRect, GWL_EXSTYLE, GWL_STYLE, WS_EX_TRANSPARENT,
         };
         let mut rect = RECT::default();
         let mut monitor = MONITORINFO {
@@ -2530,7 +2530,7 @@ unsafe extern "system" fn capture_ui_enum_proc(hwnd: HWND, lparam: LPARAM) -> BO
             // caption: a maximized editor must not step Bloom out of the way
             // for an app it has nothing to do with.
             let transparent = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TRANSPARENT.0 != 0;
-            let editor = GetWindowLongW(hwnd, GWL_STYLE) as u32 & WS_CAPTION.0 != 0;
+            let editor = has_caption_style(GetWindowLongW(hwnd, GWL_STYLE));
             let (full, notch) =
                 capture_window_effect(rect, monitor.rcMonitor, scan.notch, transparent, editor);
             scan.full |= full;
@@ -2539,6 +2539,14 @@ unsafe extern "system" fn capture_ui_enum_proc(hwnd: HWND, lparam: LPARAM) -> BO
     }
 
     BOOL(1)
+}
+
+/// Whether a window style contains the complete `WS_CAPTION` title-bar mask.
+/// `WS_CAPTION` combines `WS_BORDER | WS_DLGFRAME`; either bit alone is not a
+/// caption and must not make a capture editor block the notch.
+fn has_caption_style(style: i32) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::WS_CAPTION;
+    (style & WS_CAPTION.0 as i32) == WS_CAPTION.0 as i32
 }
 
 /// Distinguishes what a capture window blocks.
@@ -5074,6 +5082,15 @@ fn recover_from_webview_failure(handle: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn caption_detection_requires_the_complete_caption_style() {
+        use windows::Win32::UI::WindowsAndMessaging::{WS_BORDER, WS_CAPTION, WS_DLGFRAME};
+
+        assert!(!super::has_caption_style(WS_BORDER.0 as i32));
+        assert!(!super::has_caption_style(WS_DLGFRAME.0 as i32));
+        assert!(super::has_caption_style(WS_CAPTION.0 as i32));
+    }
+
     #[test]
     fn capture_selection_toolbar_editor_and_recording_border_have_distinct_effects() {
         use windows::Win32::Foundation::RECT;
